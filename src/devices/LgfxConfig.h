@@ -1,4 +1,5 @@
 #pragma once
+#define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 #include "config/PinConfig.h"
 
