@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -14,6 +15,8 @@ St7789Display display;
 
 extern "C" void app_main(void)
 {
+    initArduino(); // Arduino 컴포넌트 초기화
+    
     ESP_LOGI(TAG, "Refactored ESP-IDF Environment Started!");
 
     // 1. 디스플레이 초기화 (LgfxConfig.h에 정의된 설정 사용)
