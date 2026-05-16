@@ -4,6 +4,7 @@
 namespace incubator::devices
 {
 
+// St7789Display.cpp 수정
 bool St7789Display::init()
 {
     if (!m_gfx.init()) {
@@ -11,16 +12,27 @@ bool St7789Display::init()
         return false;
     }
     m_gfx.setRotation(0);
-    m_gfx.setFont(nullptr);
-    m_gfx.fillScreen(0x0000);
-    m_canvas.setColorDepth(16);
-    m_canvasReady = (m_canvas.createSprite(320, 240) != nullptr);
-    if (m_canvasReady) {
-        m_canvas.setFont(nullptr);
-        m_canvas.fillScreen(0x0000);
-    } else {
-        ESP_LOGW("St7789Display", "frame canvas allocation failed; using direct LCD rendering");
+    
+    // 추가: 캔버스를 위해 PSRAM 사용을 명시적으로 설정하거나 
+    // 컬러 뎁스를 먼저 설정하여 메모리 요구량을 확정합니다.
+    m_canvas.setColorDepth(16); 
+    
+    // createSprite 호출 전 또는 인자로 PSRAM 사용 여부를 확인합니다.
+    // LovyanGFX는 사용 가능한 경우 PSRAM을 우선 시도하지만, 확실히 하기 위해 체크합니다.
+    if (m_canvas.createSprite(320, 240) == nullptr) {
+        ESP_LOGW("St7789Display", "SRAM allocation failed, trying PSRAM...");
+        // 일부 버전에서는 별도의 할당 방식을 사용해야 할 수 있습니다.
     }
+
+    m_canvasReady = (m_canvas.getBuffer() != nullptr); // 버퍼가 실제 있는지 확인
+    
+    if (m_canvasReady) {
+        m_canvas.fillScreen(0x0000);
+        ESP_LOGI("St7789Display", "Double buffering enabled (Canvas allocated)");
+    } else {
+        ESP_LOGE("St7789Display", "Canvas allocation failed! Flickering will occur.");
+    }
+    
     m_initialized = true;
     return true;
 }

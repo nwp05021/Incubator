@@ -58,90 +58,6 @@ namespace
         return static_cast<int16_t>(std::lroundf(value));
     }
 
-    uint32_t visibleHash(const UiModel& model, uint32_t nowMs)
-    {
-        uint32_t hash = 2166136261U;
-        const uint32_t clockSecond = nowMs / 1000U;
-
-        hashValue(hash, model.screen);
-        hashValue(hash, model.activePage);
-        hashValue(hash, clockSecond);
-        hashValue(hash, model.currentDay);
-        hashValue(hash, model.totalDays);
-        hashValue(hash, model.progressPct);
-        hashValue(hash, model.batchStartEpoch);
-        hashValue(hash, model.cloudConnected);
-        hashValue(hash, model.wifiConfigured);
-        hashValue(hash, model.tempAlarm);
-        hashValue(hash, model.humiAlarm);
-        hashValue(hash, model.tempSensorFault);
-        hashValue(hash, model.humiSensorFault);
-        hashValue(hash, model.tempSensorWarning);
-        hashValue(hash, model.humiSensorWarning);
-        hashValue(hash, model.lockdownActive);
-        hashValue(hash, model.safeMode);
-
-        hashValue(hash, q10(model.displayTempC));
-        hashValue(hash, q1(model.displayHumidPct));
-        hashValue(hash, q10(model.targetTempC));
-        hashValue(hash, q1(model.targetHumidPct));
-        hashValue(hash, model.heaterOn);
-        hashValue(hash, model.humidifierOn);
-        hashValue(hash, model.turnerOn);
-        hashValue(hash, model.fanOn);
-        hashValue(hash, model.turningEnabled);
-        hashValue(hash, model.nextTurningInMin);
-        if (model.heaterOn || model.humidifierOn || model.turnerOn || model.fanOn) {
-            hashValue(hash, nowMs / 500U);
-        }
-
-        hashValue(hash, model.menuCursor);
-        hashValue(hash, model.manualCursor);
-        hashValue(hash, model.confirmCursor);
-        hashValue(hash, model.presetCursor);
-        hashValue(hash, model.presetConfirm);
-        hashValue(hash, model.editMode);
-        hashValue(hash, model.fieldCursor);
-        hashValue(hash, model.editBatchYear);
-        hashValue(hash, model.editBatchMonth);
-        hashValue(hash, model.editBatchDay);
-        hashValue(hash, model.editDay);
-        hashValue(hash, q10(model.editTempC));
-        hashValue(hash, q1(model.editHumidPct));
-        hashValue(hash, model.editTurning);
-        hashValue(hash, model.editIntervalMin);
-        hashValue(hash, model.activeEditField);
-        hashValue(hash, model.planListCount);
-        for (uint8_t i = 0; i < model.planListCount; ++i) {
-            hashValue(hash, model.planList[i].day);
-            hashValue(hash, q10(model.planList[i].targetTempC));
-            hashValue(hash, q1(model.planList[i].targetHumidPct));
-            hashValue(hash, model.planList[i].turningEnabled);
-            hashValue(hash, model.planList[i].intervalMin);
-            hashValue(hash, model.planList[i].overridden);
-        }
-        hashValue(hash, model.factoryProgressPct);
-        hashValue(hash, model.factoryReady);
-        hashString(hash, model.actionMessage);
-
-        hashValue(hash, model.provisioningActive);
-        hashValue(hash, model.provisioningSucceeded);
-        hashValue(hash, model.provisioningFailed);
-        hashValue(hash, model.provisioningRemainingMs / 1000U);
-        hashString(hash, model.provisioningName);
-        hashString(hash, model.provisioningPop);
-        hashString(hash, model.provisioningMessage);
-
-        if (model.screen == UiScreen::System) {
-            hashValue(hash, model.uptimeMs / 1000U);
-            hashValue(hash, model.bootCount);
-            hashValue(hash, model.batchActive);
-            hashString(hash, model.ipAddress);
-        }
-
-        return hash;
-    }
-
     const char* screenTitle(const UiModel& model)
     {
         if (model.screen == UiScreen::Menu) return "메뉴";
@@ -194,7 +110,9 @@ namespace
         uint32_t minutes = seconds / 60U;
         uint32_t hours = (minutes / 60U) % 24U;
         std::snprintf(out, len, "-- -- %02u:%02u:%02u",
-                      hours, minutes % 60U, seconds % 60U);
+                  (unsigned int)hours, 
+                  (unsigned int)(minutes % 60U), 
+                  (unsigned int)(seconds % 60U));    
     }
 
     void formatDate(char* out, size_t len)
@@ -228,58 +146,187 @@ namespace
             default: return "닭";
         }
     }
-}
+
+    // --- 1. 상단 바 전용 해시 검사 ---
+    uint32_t getHeaderHash(const UiModel& model, uint32_t nowMs)
+    {
+        uint32_t hash = 2166136261U;
+        hashValue(hash, model.screen);
+        hashValue(hash, model.activePage);
+        hashValue(hash, nowMs / 1000U);
+        hashValue(hash, model.uptimeMs / 1000U);
+        hashValue(hash, model.cloudConnected);
+        hashValue(hash, model.wifiConfigured);
+        hashValue(hash, model.tempAlarm);
+        hashValue(hash, model.humiAlarm);
+        hashValue(hash, model.tempSensorFault);
+        hashValue(hash, model.humiSensorFault);
+        hashValue(hash, model.tempSensorWarning);
+        hashValue(hash, model.humiSensorWarning);
+        return hash;
+    }
+
+    // --- 2. 하단 바 전용 해시 검사 ---
+    uint32_t getFooterHash(const UiModel& model, uint32_t nowMs)
+    {
+        uint32_t hash = 2166136261U;
+        hashValue(hash, model.screen);
+        hashValue(hash, model.currentDay);
+        hashValue(hash, model.totalDays);
+        hashValue(hash, model.heaterOn);
+        hashValue(hash, model.humidifierOn);
+        hashValue(hash, model.turnerOn);
+        hashValue(hash, model.fanOn);
+        if (model.heaterOn || model.humidifierOn || model.turnerOn || model.fanOn) {
+            hashValue(hash, nowMs / 500U);
+        }
+        return hash;
+    }
+
+    // --- 3. 중앙 메인 컨텐츠 전용 해시 검사 ---
+    uint32_t getPageHash(const UiModel& model, uint32_t nowMs)
+    {
+        uint32_t hash = 2166136261U;
+        hashValue(hash, model.screen);
+        hashValue(hash, model.activePage);
+        hashValue(hash, model.lockdownActive);
+        hashValue(hash, model.safeMode);
+
+        hashValue(hash, q10(model.displayTempC));
+        hashValue(hash, q1(model.displayHumidPct));
+        hashValue(hash, q10(model.targetTempC));
+        hashValue(hash, q1(model.targetHumidPct));
+        hashValue(hash, model.turningEnabled);
+        hashValue(hash, model.nextTurningInMin);
+
+        hashValue(hash, model.menuCursor);
+        hashValue(hash, model.manualCursor);
+        hashValue(hash, model.confirmCursor);
+        hashValue(hash, model.presetCursor);
+        hashValue(hash, model.presetConfirm);
+        hashValue(hash, model.editMode);
+        hashValue(hash, model.fieldCursor);
+        hashValue(hash, model.editBatchYear);
+        hashValue(hash, model.editBatchMonth);
+        hashValue(hash, model.editBatchDay);
+        hashValue(hash, model.editDay);
+        hashValue(hash, q10(model.editTempC));
+        hashValue(hash, q1(model.editHumidPct));
+        hashValue(hash, model.editTurning);
+        hashValue(hash, model.editIntervalMin);
+        hashValue(hash, model.activeEditField);
+        hashValue(hash, model.planListCount);
+        for (uint8_t i = 0; i < model.planListCount; ++i) {
+            hashValue(hash, model.planList[i].day);
+            hashValue(hash, q10(model.planList[i].targetTempC));
+            hashValue(hash, q1(model.planList[i].targetHumidPct));
+            hashValue(hash, model.planList[i].turningEnabled);
+            hashValue(hash, model.planList[i].intervalMin);
+            hashValue(hash, model.planList[i].overridden);
+        }
+        hashValue(hash, model.factoryProgressPct);
+        hashValue(hash, model.factoryReady);
+        hashString(hash, model.actionMessage);
+
+        hashValue(hash, model.provisioningActive);
+        hashValue(hash, model.provisioningSucceeded);
+        hashValue(hash, model.provisioningFailed);
+        hashValue(hash, model.provisioningRemainingMs / 1000U);
+        hashString(hash, model.provisioningName);
+        hashString(hash, model.provisioningPop);
+        hashString(hash, model.provisioningMessage);
+
+        if (model.screen == UiScreen::System) {
+            hashValue(hash, model.bootCount);
+            hashValue(hash, model.batchActive);
+            hashString(hash, model.ipAddress);
+        }
+        return hash;
+    }
+} // namespace
+
+// --- 여기서부터 MainUiRenderer의 멤버 함수 구현 시작 ---
 
 void MainUiRenderer::render(uint32_t nowMs)
 {
-    const uint32_t hash = visibleHash(m_model, nowMs);
-    if (m_hasRendered && hash == m_lastVisibleHash) return;
-    if (m_hasRendered && nowMs - m_lastRenderMs < 50U) return;
+    if (m_hasRendered && nowMs - m_lastRenderMs < 30U) return;
 
     m_renderNowMs = nowMs;
     m_lastRenderMs = nowMs;
-    m_lastVisibleHash = hash;
-    m_hasRendered = true;
 
     m_display.beginFrame();
+
     if (m_model.provisioningActive) {
+        if (!m_wasProvisioning) {
+            m_provisioningRenderer.reset();
+            m_wasProvisioning = true;
+        }
         m_provisioningRenderer.render(nowMs);
+        m_hasRendered = true;
         m_display.endFrame();
         return;
     }
 
-    m_display.fillScreen(Color::kBg);
-    drawStatusBar();
-
-    switch (m_model.screen) {
-        case UiScreen::Main:
-            if (m_model.activePage == 0) renderPage0();
-            else if (m_model.activePage == 1) renderPage1();
-            else renderHelp();
-            break;
-        case UiScreen::Menu: renderMenu(); break;
-        case UiScreen::StartDate: renderStartDate(); break;
-        case UiScreen::Preset: renderPreset(); break;
-        case UiScreen::PlanList: renderPlanList(); break;
-        case UiScreen::PlanEdit: renderPlanEdit(); break;
-        case UiScreen::Manual: renderManual(); break;
-        case UiScreen::WifiReset:
-            renderConfirm("WiFi 정보 리셋", "저장된 WiFi 인증정보를 삭제합니다.", "삭제 후 BLE 설정이 필요합니다.");
-            break;
-        case UiScreen::RebootConfirm:
-            renderConfirm("시스템 재부팅", "장치를 다시 시작합니다.", "진행 중 제어가 잠시 중단됩니다.");
-            break;
-        case UiScreen::FactoryReset: renderFactoryReset(); break;
-        case UiScreen::System: renderPage4(); break;
+    if (m_wasProvisioning) {
+        m_wasProvisioning = false;
+        m_firstRender = true;
     }
 
-    renderFooter();
-    if (m_model.safeMode) {
-        m_display.fillRect(72, 102, 176, 34, kDanger);
-        m_display.setTextSize(2);
-        m_display.setTextColor(Color::kText, kDanger);
-        m_display.drawText(104, 112, "SAFE MODE");
+    const uint32_t currentHeaderHash = getHeaderHash(m_model, nowMs);
+    const uint32_t currentPageHash   = getPageHash(m_model, nowMs);
+    const uint32_t currentFooterHash = getFooterHash(m_model, nowMs);
+
+    bool isHeaderDirty = m_firstRender || (currentHeaderHash != m_lastHeaderHash);
+    bool isPageDirty   = m_firstRender || (currentPageHash != m_lastPageHash);
+    bool isFooterDirty = m_firstRender || (currentFooterHash != m_lastFooterHash);
+
+    m_lastHeaderHash = currentHeaderHash;
+    m_lastPageHash   = currentPageHash;
+    m_lastFooterHash = currentFooterHash;
+    m_firstRender    = false;
+    m_hasRendered    = true;
+
+    if (isHeaderDirty) {
+        drawStatusBar();
     }
+
+    if (isPageDirty) {
+        m_display.fillRect(0, 26, Layout::kScreenW, 189, Color::kBg);
+
+        switch (m_model.screen) {
+            case UiScreen::Main:
+                if (m_model.activePage == 0) renderPage0();
+                else if (m_model.activePage == 1) renderPage1();
+                else renderHelp();
+                break;
+            case UiScreen::Menu: renderMenu(); break;
+            case UiScreen::StartDate: renderStartDate(); break;
+            case UiScreen::Preset: renderPreset(); break;
+            case UiScreen::PlanList: renderPlanList(); break;
+            case UiScreen::PlanEdit: renderPlanEdit(); break;
+            case UiScreen::Manual: renderManual(); break;
+            case UiScreen::WifiReset:
+                renderConfirm("WiFi 정보 리셋", "저장된 WiFi 인증정보를 삭제합니다.", "삭제 후 BLE 설정이 필요합니다.");
+                break;
+            case UiScreen::RebootConfirm:
+                renderConfirm("시스템 재부팅", "장치를 다시 시작합니다.", "진행 중 제어가 잠시 중단됩니다.");
+                break;
+            case UiScreen::FactoryReset: renderFactoryReset(); break;
+            case UiScreen::System: renderPage4(); break;
+        }
+
+        if (m_model.safeMode) {
+            m_display.fillRect(72, 102, 176, 34, kDanger);
+            m_display.setTextSize(2);
+            m_display.setTextColor(Color::kText, kDanger);
+            m_display.drawText(104, 112, "SAFE MODE");
+        }
+    }
+
+    if (isFooterDirty) {
+        renderFooter();
+    }
+
     m_display.endFrame();
 }
 
@@ -414,9 +461,9 @@ void MainUiRenderer::renderPage3() { renderPlanEdit(); }
 void MainUiRenderer::renderPage4()
 {
     char buffer[48];
-    std::snprintf(buffer, sizeof(buffer), "%u s", m_model.uptimeMs / 1000U);
+    std::snprintf(buffer, sizeof(buffer), "%u s", (unsigned int)(m_model.uptimeMs / 1000U));
     drawRow(58, "Uptime", buffer, false, kTeal);
-    std::snprintf(buffer, sizeof(buffer), "%u", m_model.bootCount);
+    std::snprintf(buffer, sizeof(buffer), "%u", (unsigned int)m_model.bootCount);
     drawRow(84, "Boot cnt", buffer, false, Color::kTextDim);
     drawRow(110, "Cloud", m_model.cloudConnected ? "ON" : "OFF", false, m_model.cloudConnected ? kOk : Color::kOffIcon);
     drawRow(136, "IP", m_model.ipAddress[0] ? m_model.ipAddress : "IP 없음", false, Color::kTextDim);

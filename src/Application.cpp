@@ -82,7 +82,12 @@ void Application::init()
     m_appCtrl.validateAndRepairPlan();
 
 #ifdef INCUBATOR_ENABLE_CLOUD
-    m_wifiMgr.init(WIFI_SSID, WIFI_PASSWORD);
+    // 이미 프로비저닝된 정보가 있다면 해당 정보로 시도, 없다면 하드코딩 백업 사용
+    if (m_settings.wifiConfigured) {
+        m_wifiMgr.init(m_settings.wifiSsid, m_settings.wifiPassword);
+    } else {
+        m_wifiMgr.init(WIFI_SSID, WIFI_PASSWORD);
+    }
 
     // 변경됨: 더 이상 하드코딩된 byte 배열을 사용하지 않으므로 extern 선언 삭제
     // 변경됨: 새 AwsIotClient::init() 시그니처에 맞게 m_planStorage 전달
@@ -135,9 +140,10 @@ void Application::init()
 
     m_provisioning.startBootProvisioning(millis());
 
-    ESP_LOGI(TAG, "Setup complete. Boot#%u", m_state.bootCount);
+    ESP_LOGI(TAG, "Setup complete. Boot#%u", (unsigned int)m_state.bootCount);    
 }
 
+// Application.cpp의 tick() 함수 전체 교체
 void Application::tick()
 {
     uint32_t now = millis();
@@ -149,11 +155,26 @@ void Application::tick()
     m_provisioning.tick(now);
     m_encoder.tick(now);
     m_uiCtrl.tick(now);
+
+    // --- [개선] 프로비저닝 매니저의 상태를 UI 모델에 강제 동기화 ---
+    m_uiModel.provisioningActive = m_provisioning.isActive();
+    m_uiModel.provisioningSucceeded = m_provisioning.isSucceeded();
+    m_uiModel.provisioningFailed = m_provisioning.isFailed();
+    m_uiModel.provisioningRemainingMs = m_provisioning.remainingMs(now);
+    
+    // 안전한 문자열 복사로 가동 정보 동기화
+    std::strncpy(m_uiModel.provisioningName, m_provisioning.deviceName(), sizeof(m_uiModel.provisioningName) - 1);
+    std::strncpy(m_uiModel.provisioningPop, m_provisioning.proofOfPossession(), sizeof(m_uiModel.provisioningPop) - 1);
+    std::strncpy(m_uiModel.provisioningMessage, m_provisioning.statusText(), sizeof(m_uiModel.provisioningMessage) - 1);
+
     m_renderer.render(now);
 
 #ifdef INCUBATOR_ENABLE_CLOUD
-    m_wifiMgr.tick(now);
-    m_awsClient.tick(now);
+    // --- [개선] BLE 프로비저닝이 활성화되어 있을 때는 native WifiManager의 루프를 차단 ---
+    if (!m_provisioning.isActive()) {
+        m_wifiMgr.tick(now);
+        m_awsClient.tick(now);
+    }
 #endif
 }
 

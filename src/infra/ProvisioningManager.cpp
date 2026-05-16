@@ -9,7 +9,7 @@
 #include <cstring>
 #include <ctime>
 
-#if CONFIG_BLUEDROID_ENABLED
+#if CONFIG_BT_BLUEDROID_ENABLED
 #include <wifi_provisioning/manager.h>
 #include <wifi_provisioning/scheme_ble.h>
 #endif

@@ -19,9 +19,15 @@ namespace incubator::ui
         incubator::devices::St7789Display& m_display;
         ProvisioningRenderer m_provisioningRenderer;
         uint32_t m_lastRenderMs = 0;
-        uint32_t m_lastVisibleHash = 0;
         uint32_t m_renderNowMs = 0;
         bool     m_hasRendered = false;
+        bool     m_wasProvisioning = false;
+
+        // --- Dirty 렌더링을 위한 구역별 해시 변수 추가 ---
+        uint32_t m_lastHeaderHash = 0;
+        uint32_t m_lastPageHash   = 0;
+        uint32_t m_lastFooterHash = 0;
+        bool     m_firstRender    = true;
 
         void renderPage0();
         void renderPage1();
