@@ -31,7 +31,7 @@ namespace incubator::cloud
          */
         bool init(const char* endpoint, const char* deviceId, storage::PlanStorage& storage);
 
-        void tick(uint32_t nowMs);
+        void tick(uint32_t now, float currentTemp, float currentHumidity);
         bool publish(const char* topic, const char* json);
         bool publishTelemetry(const char* json);
         bool publishHealth(const char* json, bool retain = false);
@@ -57,6 +57,12 @@ namespace incubator::cloud
         std::string m_rootCaPemStr;
         std::string m_certPemStr;
         std::string m_keyPemStr;
+
+        // --- 50초 배치 전송을 위한 변수 추가 ---
+        uint32_t m_lastSampleTime = 0;       // 마지막 샘플링 타임 스탬프 (ms)
+        float m_tempSamples[10] = {0.0f};    // 온도 데이터 10개 저장 배열
+        float m_humidSamples[10] = {0.0f};   // 습도 데이터 10개 저장 배열
+        int m_sampleCount = 0;               // 현재 수집된 데이터 개수
 
         // LittleFS 파일 읽기용 내부 헬퍼 함수
         bool readFileToString(const char* filepath, std::string& output);

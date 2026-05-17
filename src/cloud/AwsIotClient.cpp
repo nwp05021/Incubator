@@ -1,8 +1,11 @@
 #ifdef INCUBATOR_ENABLE_CLOUD
 #include "cloud/AwsIotClient.h"
-#include "storage/PlanStorage.h" // PlanStorage 인터페이스 포함
-#include <esp_log.h>\n#include <cstring>
+#include "storage/PlanStorage.h" 
+#include <esp_log.h>
+#include <cstring>
 #include <cstdio>
+
+static const char* APP_TAG = "BasicIngestApp";
 
 namespace incubator::cloud
 {
@@ -10,7 +13,6 @@ namespace
 {
     const char* TAG = "AwsIotClient";
 
-    // data/certs 폴더는 LittleFS 루트 마운트 접두어인 /littlefs 아래인 certs에 안착됩니다.
     const char* FILE_ROOT_CA   = "/littlefs/certs/aws-root-ca.pem";
     const char* FILE_CERT      = "/littlefs/certs/certificate.pem.crt";
     const char* FILE_KEY       = "/littlefs/certs/private.pem.key";
@@ -32,13 +34,11 @@ bool AwsIotClient::init(const char* endpoint, const char* deviceId, storage::Pla
         return false;
     }
 
-    // 1. 연동 검증: PlanStorage가 사전에 LittleFS 마운트를 끝마쳤는지 체크
     if (!storage.isInitialized()) {
         ESP_LOGE(TAG, "PlanStorage(LittleFS)가 마운트되지 않아 인증서를 읽을 수 없습니다.");
         return false;
     }
 
-    // 2. LittleFS 경로에서 파일 데이터를 주입받아 std::string 멤버 변수에 보관
     if (!readFileToString(FILE_ROOT_CA, m_rootCaPemStr)) {
         ESP_LOGE(TAG, "Root CA 인증서 파일 로드 실패: %s", FILE_ROOT_CA);
         return false;
@@ -55,12 +55,13 @@ bool AwsIotClient::init(const char* endpoint, const char* deviceId, storage::Pla
     std::strncpy(m_deviceId, deviceId, sizeof(m_deviceId) - 1);
     std::snprintf(m_uri, sizeof(m_uri), "mqtts://%s:%d", endpoint, kMqttPort);
     std::snprintf(m_cmdTopic, sizeof(m_cmdTopic), "incubator/%s/cmd", m_deviceId);
-    std::snprintf(m_telemetryTopic, sizeof(m_telemetryTopic), "incubator/%s/telemetry", m_deviceId);
+    
+    // [변경] AWS IoT 규칙 주제(esp32/+/telemetry) 일치를 위해 토픽 접두어를 esp32로 변경
+    std::snprintf(m_telemetryTopic, sizeof(m_telemetryTopic), "esp32/%s/telemetry", m_deviceId);
     std::snprintf(m_healthTopic, sizeof(m_healthTopic), "incubator/%s/health", m_deviceId);
 
     esp_mqtt_client_config_t mqttCfg = {};
     mqttCfg.broker.address.uri = m_uri;
-    // 읽어온 string 버퍼 데이터를 AWS IoT TLS 설정에 바인딩
     mqttCfg.broker.verification.certificate = m_rootCaPemStr.c_str();
     mqttCfg.credentials.authentication.certificate = m_certPemStr.c_str();
     mqttCfg.credentials.authentication.key = m_keyPemStr.c_str();
@@ -86,9 +87,7 @@ bool AwsIotClient::init(const char* endpoint, const char* deviceId, storage::Pla
 bool AwsIotClient::readFileToString(const char* filepath, std::string& output)
 {
     FILE* f = std::fopen(filepath, "r");
-    if (!f) {
-        return false;
-    }
+    if (!f) return false;
 
     std::fseek(f, 0, SEEK_END);
     long size = std::ftell(f);
@@ -108,7 +107,6 @@ bool AwsIotClient::readFileToString(const char* filepath, std::string& output)
     return true;
 }
 
-// ...이하 tick(), publish() 및 이벤트 핸들러 로직은 기존 소스와 동일...
 void AwsIotClient::handleMqttEvent(int32_t eventId, void* eventData)
 {
     auto* event = static_cast<esp_mqtt_event_handle_t>(eventData);
@@ -119,7 +117,6 @@ void AwsIotClient::handleMqttEvent(int32_t eventId, void* eventData)
             ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
             m_connected = true;
             esp_mqtt_client_subscribe(m_client, m_cmdTopic, kMqttQos);
-            publishOnlineStatus();
             break;
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
@@ -162,7 +159,59 @@ void AwsIotClient::mqttEventHandler(void* handlerArgs, esp_event_base_t, int32_t
     }
 }
 
-void AwsIotClient::tick(uint32_t) {}
+/**
+ * @brief 요약 설명: 5초 간격 데이터 수집 및 50초 주기 일괄 전송 로직
+ * 1. MQTT 브로커와 연결된 상태(`m_connected`)에서만 샘플링 타이머가 동작합니다.
+ * 2. 5000ms(5초)가 경과할 때마다 입력된 온습도 데이터를 배열(`m_tempSamples`, `m_humidSamples`)에 순차 저장합니다.
+ * 3. 수집 카운트(`m_sampleCount`)가 10개에 도달하면(총 50초), 데이터를 하나의 JSON 배열 구조로 직렬화합니다.
+ * 4. 구성된 텔레메트리 토픽(esp32/Incubator-1001/telemetry)으로 Publish하여 AWS 규칙 및 Lambda를 트리거합니다.
+ */
+void AwsIotClient::tick(uint32_t now, float currentTemp, float currentHumidity) 
+{
+    if (!m_connected) {
+        // 연결이 끊긴 동안은 타이머를 현재 시간으로 동기화하여 재연결 시점부터 정밀하게 작동하도록 함
+        m_lastSampleTime = now;
+        return;
+    }
+
+    // 1단계: 5초(5000ms) 주기 체크하여 데이터 버퍼링
+    if (now - m_lastSampleTime >= 5000) {
+        m_lastSampleTime = now;
+
+        if (m_sampleCount < 10) {
+            m_tempSamples[m_sampleCount] = currentTemp;
+            m_humidSamples[m_sampleCount] = currentHumidity;
+            m_sampleCount++;
+            ESP_LOGD(TAG, "센서 데이터 수집 중... (%d/10) - T: %.2f, H: %.2f", m_sampleCount, currentTemp, currentHumidity);
+        }
+
+        // 2단계: 10개 샘플링 완료 시 (50초 경과) 일괄 JSON 조립 및 전송
+        if (m_sampleCount >= 10) {
+            char jsonBuffer[1024]; // 10개 배치 데이터를 담기에 안전한 stack 버퍼 크기 할당
+            int offset = std::snprintf(jsonBuffer, sizeof(jsonBuffer), "{\"thingName\":\"%s\",\"samples\":[", m_deviceId);
+
+            for (int i = 0; i < 10; ++i) {
+                int written = std::snprintf(jsonBuffer + offset, sizeof(jsonBuffer) - offset,
+                    "{\"t\":%.2f,\"h\":%.2f}%s",
+                    m_tempSamples[i], m_humidSamples[i], (i == 9) ? "" : ",");
+                if (written > 0) {
+                    offset += written;
+                }
+            }
+            std::snprintf(jsonBuffer + offset, sizeof(jsonBuffer) - offset, "]}");
+
+            // 3단계: MQTT 전송 실행
+            if (publishTelemetry(jsonBuffer)) {
+                ESP_LOGI(TAG, "50초 주기 센서 배치 데이터 전송 성공 (Lambda 호출 트리거)");
+            } else {
+                ESP_LOGW(TAG, "배치 데이터 전송 실패");
+            }
+
+            // 카운터를 초기화하여 다음 50초 배치 데이터 수집 준비
+            m_sampleCount = 0;
+        }
+    }
+}
 
 bool AwsIotClient::publish(const char* topic, const char* json)
 {
