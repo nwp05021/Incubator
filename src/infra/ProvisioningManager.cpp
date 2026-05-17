@@ -139,16 +139,22 @@ void ProvisioningManager::cancel()
 
 void ProvisioningManager::tick(uint32_t nowMs)
 {
-    if (WiFi.status() == WL_CONNECTED) {
+if (WiFi.status() == WL_CONNECTED) {
         markConnected();
         if (m_active && m_state == ProvisioningState::Succeeded &&
             m_finishAtMs > 0U && nowMs >= m_finishAtMs) {
+            
             stopProvisioning();
             m_active = false;
+
+            // [추가] 프로비저닝이 성공적으로 끝난 직후, 새 설정을 클린 로드하기 위해 시스템을 재부팅합니다.
+            ESP_LOGI(TAG, "▶▶▶ 프로비저닝 성공! 새 네트워크 환경 적용을 위해 시스템을 재부팅합니다. ◀◀◀");
+            delay(500); // 로그가 시리얼 버퍼에 완전히 출력될 수 있도록 잠시 대기
+            esp_restart(); // 🚀 ESP32 강제 칩 리셋
         }
         return;
     }
-
+    
     if (!m_active) {
         if (m_settings.wifiConfigured && nowMs - m_lastConnectLogMs > 10000U) {
             m_lastConnectLogMs = nowMs;
@@ -223,6 +229,7 @@ void ProvisioningManager::buildDeviceIdentity()
                   mac[2], mac[3], mac[4], mac[5]);
 }
 
+// ProvisioningManager.cpp 내부의 void ProvisioningManager::markConnected() 함수 수정
 void ProvisioningManager::markConnected()
 {
     if (!m_settings.wifiConfigured ||
@@ -236,7 +243,8 @@ void ProvisioningManager::markConnected()
     if (m_active || m_state != ProvisioningState::Succeeded) {
         m_state = ProvisioningState::Succeeded;
         if (m_active && m_finishAtMs == 0U) {
-            m_finishAtMs = millis() + 15000U;
+            // [수정] 15초(15000U)는 너무 깁니다. 2초(2000U) 동안만 UI에 "Connected"를 보여줍니다.
+            m_finishAtMs = millis() + 2000U; 
         } else if (!m_active) {
             stopProvisioning();
         }

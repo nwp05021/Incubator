@@ -10,7 +10,6 @@ static const char* TAG = "App";
 namespace incubator
 {
 
-// 초기화 리스트를 통해 의존성을 주입(Combine)합니다.
 Application::Application()
     : m_aht20(m_i2c),
       m_heater(static_cast<gpio_num_t>(config::Pin::SSR_HEATER)),
@@ -82,32 +81,37 @@ void Application::init()
     m_appCtrl.validateAndRepairPlan();
 
 #ifdef INCUBATOR_ENABLE_CLOUD
-    // 이미 프로비저닝된 정보가 있다면 해당 정보로 시도, 없다면 하드코딩 백업 사용
+    // --- [표준 패턴 변경] Wi-Fi 인증 정보 존재 여부에 따른 철저한 관심사 분리 초기화 ---
     if (m_settings.wifiConfigured) {
+        ESP_LOGI(TAG, "저장된 Wi-Fi 설정을 감지했습니다. 일반 클라우드 모드로 진입합니다.");
+        
+        // 1. native Wi-Fi 매니저 가동
         m_wifiMgr.init(m_settings.wifiSsid, m_settings.wifiPassword);
-    } else {
-        m_wifiMgr.init(WIFI_SSID, WIFI_PASSWORD);
-    }
 
-    // 변경됨: 더 이상 하드코딩된 byte 배열을 사용하지 않으므로 extern 선언 삭제
-    // 변경됨: 새 AwsIotClient::init() 시그니처에 맞게 m_planStorage 전달
-    if (!m_awsClient.init(AWS_IOT_ENDPOINT, INCUBATOR_DEVICE_ID, m_planStorage)) {
-        ESP_LOGE(TAG, "AWS IoT Client init failed (Check LittleFS certs)");
-    }
-
-    // 람다 함수에서 this 포인터를 캡처하여 내부 m_appCtrl 사용
-    m_awsClient.setCmdCallback(
-        [this](const char* topic, const char* payload) {
-            cloud::CmdParser::parse(payload, this->m_appCtrl);
+        // 2. AWS IoT Client 인프라 생성 및 콜백 바인딩
+        if (!m_awsClient.init(AWS_IOT_ENDPOINT, INCUBATOR_DEVICE_ID, m_planStorage)) {
+            ESP_LOGE(TAG, "AWS IoT Client init failed (Check LittleFS certs)");
         }
-    );
+        m_awsClient.setCmdCallback(
+            [this](const char* topic, const char* payload) {
+                cloud::CmdParser::parse(payload, this->m_appCtrl);
+            }
+        );
 
-    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, "pool.ntp.org");
-    esp_sntp_init();
+        // 3. SNTP 시간 동기화 가동
+        if (!esp_sntp_enabled()) {
+            esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+            esp_sntp_setservername(0, "pool.ntp.org");
+            esp_sntp_init();
+            ESP_LOGI(TAG, "SNTP Client 정상 초기화 완료");
+        }
+    } else {
+        // 인증 정보가 없으므로 무의미한 호스트 조회 에러 방지를 위해 클라우드 인프라 초기화를 완전 차단합니다.
+        ESP_LOGW(TAG, "등록된 Wi-Fi 정보가 없습니다. 백그라운드 에러 방지를 위해 클라우드 초기화를 생략합니다.");
+    }
 #endif
 
-    // Watchdog 설정 (이전 에러 해결 반영)
+    // Watchdog 설정
     esp_task_wdt_config_t wdt_config = {
         .timeout_ms = kWatchdogTimeoutMs,
         .idle_core_mask = (1 << portNUM_PROCESSORS) - 1, 
@@ -138,12 +142,12 @@ void Application::init()
         delay(800);
     }
 
+    // Wi-Fi가 미설정 상태라면 이 함수 내부에서 판단하여 즉시 BLE 어드버타이징을 시작합니다.
     m_provisioning.startBootProvisioning(millis());
 
     ESP_LOGI(TAG, "Setup complete. Boot#%u", (unsigned int)m_state.bootCount);    
 }
 
-// Application.cpp의 tick() 함수 전체 교체
 void Application::tick()
 {
     uint32_t now = millis();
@@ -156,13 +160,11 @@ void Application::tick()
     m_encoder.tick(now);
     m_uiCtrl.tick(now);
 
-    // --- [개선] 프로비저닝 매니저의 상태를 UI 모델에 강제 동기화 ---
     m_uiModel.provisioningActive = m_provisioning.isActive();
     m_uiModel.provisioningSucceeded = m_provisioning.isSucceeded();
     m_uiModel.provisioningFailed = m_provisioning.isFailed();
     m_uiModel.provisioningRemainingMs = m_provisioning.remainingMs(now);
     
-    // 안전한 문자열 복사로 가동 정보 동기화
     std::strncpy(m_uiModel.provisioningName, m_provisioning.deviceName(), sizeof(m_uiModel.provisioningName) - 1);
     std::strncpy(m_uiModel.provisioningPop, m_provisioning.proofOfPossession(), sizeof(m_uiModel.provisioningPop) - 1);
     std::strncpy(m_uiModel.provisioningMessage, m_provisioning.statusText(), sizeof(m_uiModel.provisioningMessage) - 1);
@@ -170,10 +172,10 @@ void Application::tick()
     m_renderer.render(now);
 
 #ifdef INCUBATOR_ENABLE_CLOUD
-    // --- [개선] BLE 프로비저닝이 활성화되어 있을 때는 native WifiManager의 루프를 차단 ---
-    if (!m_provisioning.isActive()) {
+    // --- [표준 패턴 변경] 프로비저닝 진행 중이 아니고, 'Wi-Fi 설정이 완료된 상태'에서만 주기적 루프 작동 ---
+    if (!m_provisioning.isActive() && m_settings.wifiConfigured) {
         m_wifiMgr.tick(now);
-        m_awsClient.tick(now);
+        m_awsClient.tick(now, m_state.currentTempC, m_state.currentHumidityPct);    
     }
 #endif
 }

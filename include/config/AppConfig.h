@@ -21,8 +21,6 @@ static constexpr uint32_t kHealthMs         = 30000U;  // AWS IoT health heartbe
 // #define INCUBATOR_ENABLE_PROVISIONING
 
 #ifdef INCUBATOR_ENABLE_CLOUD
-#define WIFI_SSID          "your_ssid"
-#define WIFI_PASSWORD      "your_password"
-#define AWS_IOT_ENDPOINT   "xxxxxxxx.iot.ap-northeast-2.amazonaws.com"
-#define INCUBATOR_DEVICE_ID "INC-001"
+#define AWS_IOT_ENDPOINT   "a3qvzpdja8zc70-ats.iot.ap-northeast-2.amazonaws.com"
+#define INCUBATOR_DEVICE_ID "Incubator-1001"
 #endif

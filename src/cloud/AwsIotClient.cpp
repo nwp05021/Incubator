@@ -4,6 +4,7 @@
 #include <esp_log.h>
 #include <cstring>
 #include <cstdio>
+#include <ctime> // <-- [추가] time_t 및 tm 구조체 사용을 위해 이 줄을 추가합니다.
 
 static const char* APP_TAG = "BasicIngestApp";
 
@@ -34,6 +35,9 @@ bool AwsIotClient::init(const char* endpoint, const char* deviceId, storage::Pla
         return false;
     }
 
+    // --- [디버깅 코드 추가] 주소 앞뒤 공백이나 프로토콜 중복 여부 확인 ---
+    ESP_LOGI(TAG, "▶▶▶ 현재 로드된 AWS 엔드포인트 주소: [%s] ◀◀◀", endpoint);
+    
     if (!storage.isInitialized()) {
         ESP_LOGE(TAG, "PlanStorage(LittleFS)가 마운트되지 않아 인증서를 읽을 수 없습니다.");
         return false;
@@ -168,6 +172,19 @@ void AwsIotClient::mqttEventHandler(void* handlerArgs, esp_event_base_t, int32_t
  */
 void AwsIotClient::tick(uint32_t now, float currentTemp, float currentHumidity) 
 {
+    // [디버깅 추가]: 연결되지 않은 상태에서 tick이 돌고 있는지 5초마다 확인 로그 출력
+    static uint32_t lastDebugTime = 0;
+    if (now - lastDebugTime >= 5000) {
+        lastDebugTime = now;
+        time_t nowSec = time(nullptr);
+        struct tm timeinfo;
+        localtime_r(&nowSec, &timeinfo);
+        
+        ESP_LOGI(TAG, "AwsIotClient::tick 실행 중... (MQTT 연결상태: %s, 현재 연도: %d)", 
+                 m_connected ? "연결됨" : "미연결(대기중)", 
+                 timeinfo.tm_year + 1900);
+    }
+
     if (!m_connected) {
         // 연결이 끊긴 동안은 타이머를 현재 시간으로 동기화하여 재연결 시점부터 정밀하게 작동하도록 함
         m_lastSampleTime = now;
