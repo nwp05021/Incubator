@@ -10,12 +10,13 @@ namespace incubator::ui
 {
 namespace
 {
-    static constexpr uint32_t kPanel      = 0x0841U;
-    static constexpr uint32_t kPanelSoft  = 0x18E3U;
-    static constexpr uint32_t kOk         = 0x07E0U;
-    static constexpr uint32_t kWarn       = 0xFFE0U;
-    static constexpr uint32_t kDanger     = 0xF800U;
-    static constexpr uint32_t kTeal       = 0x0679U;
+// --- [리팩토링] 하드코딩 원색을 제거하고 럭셔리 세만틱 컬러로 조율 ---
+    static constexpr uint32_t kPanel      = 0x2146U; // 카드가 배경 위로 플로팅된 느낌을 주는 차콜 그레이 솔리드 박스
+    static constexpr uint32_t kPanelSoft  = 0x31CDU; // 패널 테두리를 부드럽게 감싸는 미디엄 슬레이트 틴트
+    static constexpr uint32_t kOk         = 0x3666U; // 에메랄드 민트 그린
+    static constexpr uint32_t kWarn       = 0xECE4U; // 소프트 파스텔 골드
+    static constexpr uint32_t kDanger     = 0xD906U; // 크림슨 로즈 레드
+    static constexpr uint32_t kTeal       = 0x2CDFU; // 모던하고 스마트한 감성의 세련된 사이언/인포 블루
     static constexpr uint8_t  kMenuCount  = 8;
 
     void hashBytes(uint32_t& hash, const void* data, size_t len)
@@ -378,13 +379,14 @@ void MainUiRenderer::renderFooter()
 {
     m_display.drawLine(0, 215, Layout::kScreenW, 215, Color::kDivider);
     m_display.fillRect(0, 216, Layout::kScreenW, 24, Color::kFooter);
+    
     if (m_model.screen == UiScreen::Main) {
         char progress[20];
-        drawStatusIcons();
+        drawStatusIcons(); // 개선된 구동 아이콘 드로잉
         std::snprintf(progress, sizeof(progress), "%u일차/%u", m_model.currentDay, m_model.totalDays);
         m_display.setTextSize(1);
         m_display.setTextColor(Color::kText, Color::kFooter);
-        m_display.drawText(244, 225, progress);
+        m_display.drawText(244, 223, progress); // Y축 배치 살짝 상향 조정 (가독성 벨런스)
     } else {
         m_display.setTextSize(1);
         m_display.setTextColor(Color::kTextDim, Color::kFooter);
@@ -392,46 +394,80 @@ void MainUiRenderer::renderFooter()
         if (m_model.screen == UiScreen::Manual) hint = "회전: 선택  클릭: 토글  길게: 종료";
         if (m_model.screen == UiScreen::PlanEdit) hint = "회전: 이동  클릭: 편집/확정";
         if (m_model.screen == UiScreen::FactoryReset) hint = "버튼 10초 유지: 실행  길게: 뒤로";
-        m_display.drawText(12, 225, hint);
+        m_display.drawText(12, 223, hint);
     }
 }
+
+// MainUiRenderer.cpp 내부의 void MainUiRenderer::renderPage0() 함수 전체 교체
 
 void MainUiRenderer::renderPage0()
 {
     char buffer[48];
 
-    m_display.drawLine(160, 32, 160, 158, Color::kDivider);
-    m_display.drawLine(16, 158, 144, 158, kPanelSoft);
-    m_display.drawLine(176, 158, 304, 158, kPanelSoft);
+    // 1. 중앙 분리선 (은은하고 얇은 그리드 라인으로 세련미 유지)
+    m_display.drawLine(160, 36, 160, 154, Color::kDivider);
+    
+    // 2. 텍스트 하단을 정갈하게 받쳐주는 메탈릭 가이드 앵커선
+    m_display.drawLine(20, 146, 140, 146, kPanelSoft);
+    m_display.drawLine(180, 146, 300, 146, kPanelSoft);
 
+    // ==================== [LEFT] 온도 대시보드 영역 (0 ~ 160px) ====================
     m_display.setTextSize(1);
-    m_display.setTextColor(m_model.tempSensorFault ? kDanger : Color::kAccentTemp, Color::kBg);
-    m_display.drawText(44, 42, "온도  C");
-    if (m_model.tempSensorFault) std::snprintf(buffer, sizeof(buffer), "---");
-    else std::snprintf(buffer, sizeof(buffer), "%.1f", m_model.displayTempC);
-    m_display.setTextSize(1);
-    m_display.drawNumberText(18, 78, buffer);
+    m_display.setTextColor(Color::kTextDim, Color::kBg);
+    m_display.drawText(22, 42, "TEMPERATURE"); 
+
     if (m_model.tempSensorFault) {
         m_display.setTextSize(1);
-        m_display.drawText(54, 142, "SENSOR");
+        m_display.setTextColor(kDanger, Color::kBg);
+        m_display.drawText(54, 74, "---");
+        m_display.drawText(56, 122, "FAULT");
+    } else {
+        // [핵심 변경] drawNumberText 고유의 대형 폰트가 가장 아름답게 표현되는 배율 1 설정
+        m_display.setTextSize(1); 
+        m_display.setTextColor(Color::kAccentTemp, Color::kBg);
+        std::snprintf(buffer, sizeof(buffer), "%.1f", m_model.displayTempC);
+        
+        // 대형 숫자 폰트가 중앙선을 침범하지 않고 완벽히 안착하는 X축 황금 좌표
+        m_display.drawNumberText(24, 74, buffer); 
+
+        // 단위 'C' 기호를 수치 우측 여백에 정갈하게 정렬
+        m_display.setTextSize(1);
+        m_display.setTextColor(Color::kTextDim, Color::kBg);
+        m_display.drawText(126, 76, "C");
     }
 
-    m_display.setTextColor(m_model.humiSensorFault ? kDanger : Color::kAccentHumi, Color::kBg);
+    // ==================== [RIGHT] 습도 대시보드 영역 (160 ~ 320px) ====================
     m_display.setTextSize(1);
-    m_display.drawText(212, 42, "습도  %");
-    if (m_model.humiSensorFault) std::snprintf(buffer, sizeof(buffer), "---");
-    else std::snprintf(buffer, sizeof(buffer), "%.0f", m_model.displayHumidPct);
-    m_display.setTextSize(1);
-    m_display.drawNumberText(m_model.humiSensorFault ? 194 : 204, 78, buffer);
+    m_display.setTextColor(Color::kTextDim, Color::kBg);
+    m_display.drawText(182, 42, "HUMIDITY");
+
     if (m_model.humiSensorFault) {
         m_display.setTextSize(1);
-        m_display.drawText(214, 142, "SENSOR");
+        m_display.setTextColor(kDanger, Color::kBg);
+        m_display.drawText(214, 74, "---");
+        m_display.drawText(216, 122, "FAULT");
+    } else {
+        // 습도 영역도 밸런스를 맞추기 위해 정갈한 기본 대형 폰트 배율 1 적용
+        m_display.setTextSize(1);
+        m_display.setTextColor(Color::kAccentHumi, Color::kBg);
+        std::snprintf(buffer, sizeof(buffer), "%.0f", m_model.displayHumidPct);
+        
+        // 습도 수치가 우측 그리드(320px) 내에 황금 비율로 배치되는 X축 좌표
+        m_display.drawNumberText(198, 74, buffer);
+
+        // 단위 '%' 기호 정렬
+        m_display.setTextSize(1);
+        m_display.setTextColor(Color::kTextDim, Color::kBg);
+        m_display.drawText(274, 76, "%");
     }
 
-    std::snprintf(buffer, sizeof(buffer), "목표 %.1fC", m_model.targetTempC);
-    drawPill(24, 174, 116, buffer, Color::kAccentTemp);
-    std::snprintf(buffer, sizeof(buffer), "목표 %.0f%%", m_model.targetHumidPct);
-    drawPill(180, 174, 116, buffer, Color::kAccentHumi);
+    // ==================== [BOTTOM] 하단 설정치(SET) 알약 모양 안내 라벨 ====================
+    m_display.setTextSize(1);
+    std::snprintf(buffer, sizeof(buffer), "SET %.1f C", m_model.targetTempC);
+    drawPill(20, 172, 120, buffer, Color::kAccentTemp); // 가로 폭 정밀 피팅
+
+    std::snprintf(buffer, sizeof(buffer), "SET %.0f %%", m_model.targetHumidPct);
+    drawPill(180, 172, 120, buffer, Color::kAccentHumi);
 }
 
 void MainUiRenderer::renderPage1()
@@ -669,23 +705,42 @@ void MainUiRenderer::renderFactoryReset()
 void MainUiRenderer::drawStatusIcons()
 {
     m_display.setTextSize(1);
+    // 500ms 주기로 토글되는 깜빡임 플래그
     const bool blinkVisible = ((m_renderNowMs / 500U) % 2U) == 0U;
 
     auto drawFooterPill = [&](int x, int w, const char* label, bool active) {
-        const uint32_t border = active ? kOk : Color::kOffIcon;
-        const uint32_t fill = (active && blinkVisible) ? kOk : Color::kFooter;
-        const uint32_t text = (active && blinkVisible) ? 0x0000U : (active ? kOk : Color::kTextDim);
+        // 1. 기본 상태 정의 (구동 안 할 때는 어두운 슬레이트 실버로 은은하게 표현)
+        uint32_t border = Color::kOffIcon;
+        uint32_t fill   = Color::kFooter; // 하단바 배경색 (0x10A3U)
+        uint32_t text   = Color::kTextDim; // 메탈릭 실버 그레이
 
+        // 2. 해당 기능이 구동(Active) 중일 때의 고대비 깜빡임 로직
+        if (active) {
+            border = kOk; // 테두리는 언제나 선명한 에메랄드 민트 고정
+            
+            if (blinkVisible) {
+                // [ON 타이밍] 배경을 민트색으로 채우고, 글자는 가장 밝은 화이트로 시인성 확보!
+                fill = kOk;
+                text = Color::kText; // 0xFFFFU (크리스탈 화이트)
+            } else {
+                // [OFF 타이밍] 배경을 비우고(바탕색), 글자 자체를 민트색으로 변경하여 대비 극대화!
+                fill = Color::kFooter;
+                text = kOk; // 0x3666U (에메랄드 민트)
+            }
+        }
+
+        // 3. 정밀하게 계산된 색상으로 렌더링
         m_display.fillRect(x, 218, w, 20, fill);
         m_display.drawRect(x, 218, w, 20, border);
         m_display.setTextColor(text, fill);
         m_display.drawText(x + (hasUtf8(label) ? 8 : 6), 222, label);
     };
 
-    drawFooterPill(8, 42, "히터", m_model.heaterOn);
+    // 하단 제어 상태 알약 라벨 드로잉
+    drawFooterPill(8,  42, "히터", m_model.heaterOn);
     drawFooterPill(54, 42, "가습", m_model.humidifierOn);
     drawFooterPill(100, 42, "전란", m_model.turnerOn);
-    drawFooterPill(146, 32, "팬", m_model.fanOn);
+    drawFooterPill(146, 32, "팬",  m_model.fanOn);
 }
 
 void MainUiRenderer::drawSignalBars(int x, int y, bool connected, bool configured)
