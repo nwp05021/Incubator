@@ -63,13 +63,12 @@ bool PlanStorage::save(const domain::IncubationPlanTable& table)
 {
     if (!m_mounted) return false;
     
-    // 고정 메모리 풀을 사용하는 DynamicJsonDocument 할당
-    DynamicJsonDocument doc(8192);
+    // [보정] 일수가 길어지거나 데이터가 늘어날 것에 대비해 버퍼 크기를 16KB로 넉넉하게 확장
+    DynamicJsonDocument doc(16384);
     doc[kFTableVersion] = table.tableVersion;
     doc[kFLastUpdatedAt] = table.lastUpdatedAt;
     doc[kFRowCount] = table.rowCount;
     
-    // 가변 배열 데이터를 JSON Array 구조로 레이아웃 생성
     auto rows = doc.createNestedArray(kFRows);
     for (uint16_t i = 0; i < table.rowCount; ++i) {
         auto row = rows.createNestedObject();
@@ -82,21 +81,19 @@ bool PlanStorage::save(const domain::IncubationPlanTable& table)
         row[kFOverride] = table.rows[i].userOverridden;
     }
 
-    // FILE_WRITE 모드로 파일을 오픈하여 스트림 획득 (기존 데이터는 덮어씌워짐)
     File file = LittleFS.open(kPlanPath, FILE_WRITE);
     if (!file) {
         ESP_LOGE(TAG, "쓰기를 위한 plan.json 오픈 실패");
         return false;
     }
     
-    // JSON Object 데이터를 파일 스트림에 직렬화하여 기록
     if (serializeJson(doc, file) == 0) {
-        file.close(); // 에러 발생 시 파일 핸들을 반드시 닫아줌
+        file.close();
         ESP_LOGE(TAG, "serializeJson 작성 실패");
         return false;
     }
     
-    file.close(); // 정상 작성 완료 후 닫기
+    file.close();
     return true;
 }
 
@@ -105,36 +102,39 @@ bool PlanStorage::save(const domain::IncubationPlanTable& table)
  */
 bool PlanStorage::load(domain::IncubationPlanTable& table)
 {
-    if (!m_mounted) return false;
-    if (!exists()) return false;
+    if (!m_mounted) {
+        ESP_LOGE(TAG, "LittleFS가 마운트되지 않은 상태에서 load 시도됨!");
+        return false;
+    }
+    if (!exists()) {
+        ESP_LOGW(TAG, "plan.json 파일이 존재하지 않습니다.");
+        return false;
+    }
 
-    // FILE_READ 모드로 파일 오픈
     File file = LittleFS.open(kPlanPath, FILE_READ);
     if (!file) {
         ESP_LOGE(TAG, "읽기를 위한 plan.json 오픈 실패");
         return false;
     }
 
-    // 아두이노 JSON 파싱 엔진 가동
-    DynamicJsonDocument doc(8192);
+    // [보정] 로드 시 역직렬화 오버헤드를 견디기 위해 버퍼 크기를 16KB로 확장
+    DynamicJsonDocument doc(16384);
     DeserializationError err = deserializeJson(doc, file);
-    file.close(); // 데이터 파싱 완료 직후 파일 스트림은 즉시 해제하는 것이 안전함
+    file.close(); 
 
     if (err) {
-        ESP_LOGE(TAG, "deserializeJson 파싱 실패: %s", err.c_str());
+        // 이 로그가 시리얼 모니터에 찍힌다면 100% JSON 버퍼 용량 부족 에러입니다.
+        ESP_LOGE(TAG, "deserializeJson 파싱 실패 원인: %s", err.c_str());
         return false;
     }
 
-    // 데이터 무결성 검증 (배열 키가 누락되었는지 확인)
     if (!doc.containsKey(kFRows)) return false;
     
-    // 타겟 구조체 초기화 후 기본 필드 대입
     table.clear();
     table.tableVersion = doc[kFTableVersion] | 0;
     table.lastUpdatedAt = doc[kFLastUpdatedAt] | 0U;
     table.rowCount = 0;
 
-    // JSON 내부 배열을 순회하며 구조체 버퍼 영역으로 복사 연산 수행
     auto rows = doc[kFRows].as<JsonArray>();
     for (JsonObject row : rows) {
         if (table.rowCount >= domain::IncubationPlanTable::kMaxRows) break;
@@ -151,8 +151,13 @@ bool PlanStorage::load(domain::IncubationPlanTable& table)
         table.rowCount++;
     }
 
-    // 최종 로드된 도메인 데이터 구조체의 비즈니스 룰 검증 결과 반환
-    return table.isValid();
+    // [보정] 데이터는 다 읽었으나 비즈니스 룰 검증에서 탈락했는지 판별하기 위한 추적 로그 추가
+    bool valid = table.isValid();
+    if (!valid) {
+        ESP_LOGE(TAG, "JSON 파싱은 성공했으나, table.isValid() 도메인 검증에서 실패함! (rowCount: %u)", table.rowCount);
+    }
+
+    return valid;
 }
 
 } // namespace incubator::storage

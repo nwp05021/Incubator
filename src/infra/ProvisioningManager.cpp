@@ -229,21 +229,19 @@ void ProvisioningManager::buildDeviceIdentity()
                   mac[2], mac[3], mac[4], mac[5]);
 }
 
-// ProvisioningManager.cpp 내부의 void ProvisioningManager::markConnected() 함수 수정
 void ProvisioningManager::markConnected()
 {
-    if (!m_settings.wifiConfigured ||
-        std::strncmp(m_settings.wifiSsid, WiFi.SSID().c_str(), sizeof(m_settings.wifiSsid)) != 0) {
+    // [수정] 프로비저닝 동작 수행 중(m_active)에 아이피를 할당받았다면 
+    // handleEvent에서 확보한 SSID와 Password가 포함된 m_settings 블록을 NVS에 온전하게 영구 저장합니다.
+    if (m_active) {
         m_settings.wifiConfigured = true;
-        std::memset(m_settings.wifiSsid, 0, sizeof(m_settings.wifiSsid));
-        std::strncpy(m_settings.wifiSsid, WiFi.SSID().c_str(), sizeof(m_settings.wifiSsid) - 1U);
         m_nvs.saveBlob(storage::NvsStorage::kKeySettings, &m_settings, sizeof(m_settings));
+        ESP_LOGI(TAG, "New Wi-Fi credentials committed to NVS Storage successfully.");
     }
 
     if (m_active || m_state != ProvisioningState::Succeeded) {
         m_state = ProvisioningState::Succeeded;
         if (m_active && m_finishAtMs == 0U) {
-            // [수정] 15초(15000U)는 너무 깁니다. 2초(2000U) 동안만 UI에 "Connected"를 보여줍니다.
             m_finishAtMs = millis() + 2000U; 
         } else if (!m_active) {
             stopProvisioning();
@@ -270,6 +268,13 @@ void ProvisioningManager::handleEvent(int32_t eventId, void* eventInfo)
             m_timeoutMs = 60000U;
             ESP_LOGI(TAG, "Provisioning credentials received: ssid=%s",
                      reinterpret_cast<const char*>(info->prov_cred_recv.ssid));
+
+            // [수정] 수신된 옥텟 스트림 자격 증명에서 SSID와 Password를 안전하게 적출하여 구조체에 선제 기록합니다.
+            std::memset(m_settings.wifiSsid, 0, sizeof(m_settings.wifiSsid));
+            std::strncpy(m_settings.wifiSsid, reinterpret_cast<const char*>(info->prov_cred_recv.ssid), sizeof(m_settings.wifiSsid) - 1U);
+            
+            std::memset(m_settings.wifiPassword, 0, sizeof(m_settings.wifiPassword));
+            std::strncpy(m_settings.wifiPassword, reinterpret_cast<const char*>(info->prov_cred_recv.password), sizeof(m_settings.wifiPassword) - 1U);
             break;
 
         case ARDUINO_EVENT_PROV_CRED_SUCCESS:
