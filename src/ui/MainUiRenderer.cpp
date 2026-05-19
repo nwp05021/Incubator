@@ -252,8 +252,29 @@ namespace
 
 void MainUiRenderer::render(uint32_t nowMs)
 {
+    // 30ms 렌더링 주기 제한 케어
     if (m_hasRendered && nowMs - m_lastRenderMs < 30U) return;
 
+    // 1. 각 독립 영역의 변경 사항(Dirty) 상태를 먼저 계산합니다.
+    const uint32_t currentHeaderHash = getHeaderHash(m_model, nowMs);
+    const uint32_t currentPageHash   = getPageHash(m_model, nowMs);
+    const uint32_t currentFooterHash = getFooterHash(m_model, nowMs);
+
+    bool isHeaderDirty = m_firstRender || (currentHeaderHash != m_lastHeaderHash);
+    bool isPageDirty   = m_firstRender || (currentPageHash != m_lastPageHash);
+    bool isFooterDirty = m_firstRender || (currentFooterHash != m_lastFooterHash);
+
+    // [버그 수정] 상단바 시간(초)이 바뀔 때마다 본문 전체를 fillRect로 지우고 
+    // 새로 그리던 강제 연동 로직을 과감히 제거합니다.
+    // if (isHeaderDirty) { isPageDirty = true; }
+
+    bool isAnyDirty = isHeaderDirty || isPageDirty || isFooterDirty;
+
+    // 2. 만약 변경사항이 단 하나도 없다면 SPI 버스 과부하 및 화면 깜박임을 
+    // 완전히 차단하기 위해 아무 작업도 하지 않고 루프를 탈출(Early Return)합니다.
+    if (!isAnyDirty) return;
+
+    // 타임스탬프 및 내부 상태 최신화
     m_renderNowMs = nowMs;
     m_lastRenderMs = nowMs;
 
@@ -275,35 +296,20 @@ void MainUiRenderer::render(uint32_t nowMs)
         m_firstRender = true;
     }
 
-    const uint32_t currentHeaderHash = getHeaderHash(m_model, nowMs);
-    const uint32_t currentPageHash   = getPageHash(m_model, nowMs);
-    const uint32_t currentFooterHash = getFooterHash(m_model, nowMs);
-
-    bool isHeaderDirty = m_firstRender || (currentHeaderHash != m_lastHeaderHash);
-    bool isPageDirty   = m_firstRender || (currentPageHash != m_lastPageHash);
-    bool isFooterDirty = m_firstRender || (currentFooterHash != m_lastFooterHash);
-
-    // [핵심 수정] WiFi 연결 상태나 알람 상태가 변경되어 상단바가 갱신되어야 한다면 
-    // 본문 페이지도 함께 dirty 상태로 만들어 전체적인 렌더링 싱크를 맞추고 잔상을 방지합니다.
-    if (isHeaderDirty) {
-        isPageDirty = true;
-    }
-
     m_lastHeaderHash = currentHeaderHash;
     m_lastPageHash   = currentPageHash;
     m_lastFooterHash = currentFooterHash;
     m_firstRender    = false;
     m_hasRendered    = true;
 
-    // 1. 상단바 그리기
+    // 3. 진짜 변경이 일어난 영역만 부분적으로 캔버스(또는 화면)에 렌더링합니다.
+    // 1) 상단바 영역
     if (isHeaderDirty) {
         drawStatusBar();
     }
 
-    // 2. 본문 바디 영역 그리기
+    // 2) 본문 바디 영역 (값의 변화나 페이지 전환 시에만 동작)
     if (isPageDirty) {
-        // [핵심 수정] 기존에 26부터 지우던 것을 상단바 영역(0~29)을 완벽히 보존하기 위해 
-        // 확실하게 Layout::kBodyY (50) 또는 상단바 경계 바깥인 30부터 지우도록 수정합니다.
         m_display.fillRect(0, 30, Layout::kScreenW, 185, Color::kBg);
 
         switch (m_model.screen) {
@@ -336,11 +342,12 @@ void MainUiRenderer::render(uint32_t nowMs)
         }
     }
 
-    // 3. 하단바 그리기
+    // 3) 하단바 영역
     if (isFooterDirty) {
         renderFooter();
     }
 
+    // 실제로 변경이 발생했을 때만 최종 버퍼를 전송합니다.
     m_display.endFrame();
 }
 

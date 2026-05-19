@@ -81,7 +81,6 @@ void Application::init()
     m_appCtrl.validateAndRepairPlan();
 
 #ifdef INCUBATOR_ENABLE_CLOUD
-    // --- [표준 패턴 변경] Wi-Fi 인증 정보 존재 여부에 따른 철저한 관심사 분리 초기화 ---
     if (m_settings.wifiConfigured) {
         ESP_LOGI(TAG, "저장된 Wi-Fi 설정을 감지했습니다. 일반 클라우드 모드로 진입합니다.");
         
@@ -98,16 +97,8 @@ void Application::init()
             }
         );
 
-        // 3. SNTP 시간 동기화 가동
-        if (!esp_sntp_enabled()) {
-            esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-            esp_sntp_setservername(0, "pool.ntp.org");
-            esp_sntp_init();
-            ESP_LOGI(TAG, "SNTP Client 정상 초기화 완료");
-        }
-    } else {
-        // 인증 정보가 없으므로 무의미한 호스트 조회 에러 방지를 위해 클라우드 인프라 초기화를 완전 차단합니다.
-        ESP_LOGW(TAG, "등록된 Wi-Fi 정보가 없습니다. 백그라운드 에러 방지를 위해 클라우드 초기화를 생략합니다.");
+        // ❌ [삭제/주석 처리] 이곳에 있던 esp_sntp_init() 관련 코드를 통째로 들어냅니다.
+        // if (!esp_sntp_enabled()) { ... }
     }
 #endif
 
@@ -172,9 +163,38 @@ void Application::tick()
     m_renderer.render(now);
 
 #ifdef INCUBATOR_ENABLE_CLOUD
-    // --- [표준 패턴 변경] 프로비저닝 진행 중이 아니고, 'Wi-Fi 설정이 완료된 상태'에서만 주기적 루프 작동 ---
     if (!m_provisioning.isActive() && m_settings.wifiConfigured) {
         m_wifiMgr.tick(now);
+
+        // ─── [아키텍처 추가] 유효 IP 커넥션 확립 직후 SNTP 가동 ───
+        static bool sntpReady = false;
+        if (m_wifiMgr.isConnected()) {
+            if (!sntpReady) {
+                if (!esp_sntp_enabled()) {
+                    ESP_LOGI(TAG, "▶ [네트워크 감지] 정상 IP 확보 완료. SNTP 인프라를 동적 활성화합니다.");
+                    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+                    
+                    // 국내 환경 응답 속도 극대화를 위한 멀티 레이어 타임 서버 배치
+                    esp_sntp_setservername(0, "kr.pool.ntp.org");
+                    esp_sntp_setservername(1, "time.windows.com");
+                    esp_sntp_setservername(2, "pool.ntp.org");
+                    
+                    esp_sntp_init();
+
+                    // 대한민국 표준시(KST) 타임존 환경변수 명시적 설정
+                    setenv("TZ", "KST-9", 1);
+                    tzset();
+                    
+                    ESP_LOGI(TAG, "▶ [SNTP] 타임 서버 바인딩 및 타임존(KST) 보정 완료.");
+                }
+                sntpReady = true;
+            }
+        } else {
+            // 연결 유실 시 재연결 시점에 즉각 리프레시 쿼리를 날리고 싶다면
+            // 이곳에서 sntpReady = false 처리를 고려할 수 있으나, lwIP 자체 폴링이 작동하므로
+            // 부팅 직후 최초 동기화 지연 청소용으로는 이 true 유지 구조만으로 충분합니다.
+        }
+
         m_awsClient.tick(now, m_state.currentTempC, m_state.currentHumidityPct);    
     }
 #endif
