@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 namespace incubator::ui::Layout
 {
     static constexpr int kScreenW     = 320;
@@ -23,4 +25,7 @@ namespace incubator::ui::Layout
     static constexpr int kIconHumX    = 58;
     static constexpr int kIconTrnX    = 111;
     static constexpr int kIconFanX    = 164;
+
+    static constexpr uint8_t kMenuCount = 9;
+    static constexpr uint8_t kMainPageCount = 3;
 }

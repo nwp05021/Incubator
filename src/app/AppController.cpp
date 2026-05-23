@@ -85,6 +85,8 @@ bool AppController::applyCommand(Cmd cmd, const void* payload, size_t sz)
         ESP_LOGW("AppCtrl", "Unknown Cmd: %u", static_cast<unsigned>(cmd));
         return false;
     }
+
+
 }
 
 bool AppController::cmdStartBatch(const domain::IncubationBatch& b)

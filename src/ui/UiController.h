@@ -1,12 +1,15 @@
 #pragma once
+#include "ui/UiLayout.h"
 #include "ui/UiModel.h"
 #include "domain/RuntimeState.h"
 #include "domain/IncubationPlanTable.h"
 #include "app/AppController.h"
 #include "devices/Ec11Encoder.h"
 #include "infra/ProvisioningManager.h"
+#include <cstddef>
 #include <cstdint>
 #include <ctime>
+#include <functional>
 
 namespace incubator::ui
 {
@@ -14,6 +17,7 @@ namespace incubator::ui
     {
     public:
         static constexpr uint32_t kSyncIntervalMs = 100;
+        using AwsPublishCallback = std::function<bool(const char* topic, const char* payload)>;
 
         UiController(UiModel& model,
                      const domain::RuntimeState& state,
@@ -28,6 +32,7 @@ namespace incubator::ui
         }
 
         void tick(uint32_t nowMs);
+        void setAwsPublishCallback(AwsPublishCallback cb) { m_awsPublishCb = cb; }
 
     private:
         void syncFromState();
@@ -49,6 +54,10 @@ namespace incubator::ui
         void presetDelta(int d);
         void presetClick();
         void planListDelta(int d);
+        void awsTestDelta(int d);
+        void awsTestClick();
+        bool buildAwsTestPayload(char* buf, size_t bufSize) const;
+        void formatAwsTopic(char* buf, size_t bufSize) const;
         void wifiResetClick();
         void rebootClick();
         void factoryTick(uint32_t nowMs);
@@ -67,6 +76,7 @@ namespace incubator::ui
         app::AppController& m_ctrl;
         infra::ProvisioningManager& m_provisioning;
         devices::Ec11Encoder& m_encoder;
+        AwsPublishCallback m_awsPublishCb;
 
         uint32_t m_lastSyncMs = 0;
         uint32_t m_factoryStartedMs = 0;

@@ -1,6 +1,4 @@
 #include "ui/MainUiRenderer.h"
-#include "ui/UiLayout.h"
-#include "ui/UiColors.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -10,13 +8,6 @@ namespace incubator::ui
 {
 namespace
 {
-    static constexpr uint32_t kPanel      = 0x2146U; 
-    static constexpr uint32_t kPanelSoft  = 0x31CDU; 
-    static constexpr uint32_t kOk         = 0x3666U; 
-    static constexpr uint32_t kWarn       = 0xECE4U; 
-    static constexpr uint32_t kDanger     = 0xD906U; 
-    static constexpr uint8_t  kMenuCount  = 8;
-
     void hashBytes(uint32_t& hash, const void* data, size_t len)
     {
         const auto* p = static_cast<const uint8_t*>(data);
@@ -64,6 +55,7 @@ namespace
         if (model.screen == UiScreen::Preset) return "프리셋 선택";
         if (model.screen == UiScreen::PlanList || model.screen == UiScreen::PlanEdit) return "부화 스케줄";
         if (model.screen == UiScreen::Manual) return "수동 테스트";
+        if (model.screen == UiScreen::AwsTest) return "AWS 테스트";
         if (model.screen == UiScreen::System) return "SYSTEM";
         if (model.screen == UiScreen::WifiReset) return "WiFi 정보 리셋";
         if (model.screen == UiScreen::RebootConfirm) return "시스템 재부팅";
@@ -132,17 +124,6 @@ namespace
                           tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday);
         } else {
             std::snprintf(out, len, "---- -- --");
-        }
-    }
-
-    const char* presetName(uint8_t i)
-    {
-        switch (i) {
-            case 0: return "닭";
-            case 1: return "오리";
-            case 2: return "메추리";
-            case 3: return "거위";
-            default: return "닭";
         }
     }
 
@@ -246,7 +227,16 @@ namespace
             hashValue(hash, model.batchActive);
             hashString(hash, model.ipAddress);
         }
-        return hash;
+
+        // MainUiRenderer.cpp 내부 getPageHash() 함수 하단
+        hashValue(hash, model.awsTestRunning);
+        hashValue(hash, model.awsEndpointCursor);
+        hashValue(hash, model.awsTestCount);
+        hashValue(hash, model.awsLastResult);
+        for (uint8_t i = 0; i < 4; ++i) {
+            hashString(hash, model.awsTestLog[i]);
+        }
+        return hash;        
     }
 } // namespace
 
@@ -305,7 +295,7 @@ void MainUiRenderer::render(uint32_t nowMs)
     // 3. 진짜 변경이 일어난 영역만 부분적으로 캔버스(또는 화면)에 렌더링합니다.
     // 1) 상단바 영역
     if (isHeaderDirty) {
-        drawStatusBar();
+        drawStatusBar(nowMs);
     }
 
     // 2) 본문 바디 영역 (값의 변화나 페이지 전환 시에만 동작)
@@ -314,44 +304,48 @@ void MainUiRenderer::render(uint32_t nowMs)
 
         switch (m_model.screen) {
             case UiScreen::Main:
-                if (m_model.activePage == 0) renderPage0();
+                if (m_model.activePage == 0) m_pageMain.render(nowMs);
                 else if (m_model.activePage == 1) renderPage1();
-                else renderHelp();
+                else m_pageHelp.render(nowMs);
                 break;
-            case UiScreen::Menu: renderMenu(); break;
-            case UiScreen::StartDate: renderStartDate(); break;
-            case UiScreen::Preset: renderPreset(); break;
-            case UiScreen::PlanList: renderPlanList(); break;
-            case UiScreen::PlanEdit: renderPlanEdit(); break;
-            case UiScreen::Manual: renderManual(); break;
+            case UiScreen::Menu: m_pageMenu.render(nowMs); break;
+            case UiScreen::StartDate: m_pageStartDate.render(nowMs); break;
+            case UiScreen::Preset: m_pagePreset.render(nowMs); break;
+            case UiScreen::PlanList: m_pagePlanList.render(nowMs); break;
+            case UiScreen::PlanEdit: m_pagePlanEdit.render(nowMs); break;
+            case UiScreen::Manual: m_pageManual.render(nowMs); break;
+            case UiScreen::AwsTest: m_pageAwsTest.render(nowMs); break;
             case UiScreen::WifiReset:
                 renderConfirm("WiFi 정보 리셋", "저장된 WiFi 인증정보를 삭제합니다.", "삭제 후 BLE 설정이 필요합니다.");
                 break;
             case UiScreen::RebootConfirm:
                 renderConfirm("시스템 재부팅", "장치를 다시 시작합니다.", "진행 중 제어가 잠시 중단됩니다.");
                 break;
-            case UiScreen::FactoryReset: renderFactoryReset(); break;
-            case UiScreen::System: renderPage4(); break;
+            case UiScreen::FactoryReset: m_pageFactoryReset.render(nowMs); break;
+            case UiScreen::System: m_pageAwsTest.render(nowMs); break;
+
+            // 🔥 이 한 줄을 추가해 주세요!
+            case UiScreen::BleProvisioning: break;            
         }
 
         if (m_model.safeMode && m_model.screen == UiScreen::Main) {
-            m_display.fillRect(72, 102, 176, 34, kDanger);
+            m_display.fillRect(72, 102, 176, 34, Color::kDanger);
             m_display.setTextSize(2);
-            m_display.setTextColor(Color::kText, kDanger);
+            m_display.setTextColor(Color::kText, Color::kDanger);
             m_display.drawText(104, 112, "SAFE MODE");
         }
     }
 
     // 3) 하단바 영역
     if (isFooterDirty) {
-        renderFooter();
+        renderFooter(nowMs);
     }
 
     // 실제로 변경이 발생했을 때만 최종 버퍼를 전송합니다.
     m_display.endFrame();
 }
 
-void MainUiRenderer::drawStatusBar()
+void MainUiRenderer::drawStatusBar(uint32_t nowMs)
 {
     char buffer[32];
     m_display.fillRect(0, 0, Layout::kScreenW, 26, Color::kHeader);
@@ -374,7 +368,7 @@ void MainUiRenderer::drawStatusBar()
         const bool hardAlarm = m_model.tempAlarm || m_model.humiAlarm ||
                                m_model.tempSensorFault || m_model.humiSensorFault;
         const bool sensorWarning = m_model.tempSensorWarning || m_model.humiSensorWarning;
-        const uint32_t warnColor = hardAlarm ? kDanger : (sensorWarning ? kWarn : Color::kOffIcon);
+        const uint32_t warnColor = hardAlarm ? Color::kDanger : (sensorWarning ? Color::kWarn : Color::kOffIcon);
         m_display.drawRect(292, 6, 18, 14, warnColor);
         m_display.setTextSize(1);
         m_display.setTextColor(warnColor, Color::kHeader);
@@ -384,7 +378,7 @@ void MainUiRenderer::drawStatusBar()
     m_display.drawLine(0, 25, Layout::kScreenW, 25, Color::kDivider);
 }
 
-void MainUiRenderer::renderHeader()
+void MainUiRenderer::renderHeader(uint32_t nowMs)
 {
     m_display.fillRect(0, 24, Layout::kScreenW, 26, Color::kHeader);
     m_display.setTextSize(1);
@@ -395,14 +389,14 @@ void MainUiRenderer::renderHeader()
     m_display.drawLine(0, 49, Layout::kScreenW, 49, Color::kDivider);
 }
 
-void MainUiRenderer::renderFooter()
+void MainUiRenderer::renderFooter(uint32_t nowMs)
 {
     m_display.drawLine(0, 215, Layout::kScreenW, 215, Color::kDivider);
     m_display.fillRect(0, 216, Layout::kScreenW, 24, Color::kFooter);
     
     if (m_model.screen == UiScreen::Main) {
         char progress[20];
-        drawStatusIcons(); 
+        drawStatusIcons(nowMs); 
         std::snprintf(progress, sizeof(progress), "%u일차/%u", m_model.currentDay, m_model.totalDays);
         m_display.setTextSize(1);
         m_display.setTextColor(Color::kText, Color::kFooter);
@@ -416,62 +410,6 @@ void MainUiRenderer::renderFooter()
         if (m_model.screen == UiScreen::FactoryReset) hint = "버튼 10초 유지: 실행  길게: 뒤로";
         m_display.drawText(12, 223, hint);
     }
-}
-
-void MainUiRenderer::renderPage0()
-{
-    char buffer[48];
-
-    m_display.drawLine(160, 36, 160, 154, Color::kDivider);
-    m_display.drawLine(20, 146, 140, 146, kPanelSoft);
-    m_display.drawLine(180, 146, 300, 146, kPanelSoft);
-
-    m_display.setTextSize(1);
-    m_display.setTextColor(Color::kTextDim, Color::kBg);
-    m_display.drawText(22, 42, "온도"); 
-
-    if (m_model.tempSensorFault) {
-        m_display.setTextSize(1);
-        m_display.setTextColor(kDanger, Color::kBg);
-        m_display.drawText(54, 74, "---");
-        m_display.drawText(56, 122, "FAULT");
-    } else {
-        m_display.setTextSize(1); 
-        m_display.setTextColor(Color::kAccentTemp, Color::kBg);
-        std::snprintf(buffer, sizeof(buffer), "%.1f", m_model.displayTempC);
-        m_display.drawNumberText(24, 74, buffer); 
-
-        m_display.setTextSize(1);
-        m_display.setTextColor(Color::kTextDim, Color::kBg);
-        m_display.drawText(140, 76, "C");
-    }
-
-    m_display.setTextSize(1);
-    m_display.setTextColor(Color::kTextDim, Color::kBg);
-    m_display.drawText(182, 42, "습도");
-
-    if (m_model.humiSensorFault) {
-        m_display.setTextSize(1);
-        m_display.setTextColor(kDanger, Color::kBg);
-        m_display.drawText(214, 74, "---");
-        m_display.drawText(216, 122, "FAULT");
-    } else {
-        m_display.setTextSize(1);
-        m_display.setTextColor(Color::kAccentHumi, Color::kBg);
-        std::snprintf(buffer, sizeof(buffer), "%.0f", m_model.displayHumidPct);
-        m_display.drawNumberText(198, 74, buffer);
-
-        m_display.setTextSize(1);
-        m_display.setTextColor(Color::kTextDim, Color::kBg);
-        m_display.drawText(274, 76, "%");
-    }
-
-    m_display.setTextSize(1);
-    std::snprintf(buffer, sizeof(buffer), "SET %.1f C", m_model.targetTempC);
-    drawPill(20, 172, 120, buffer, Color::kAccentTemp); 
-
-    std::snprintf(buffer, sizeof(buffer), "SET %.0f %%", m_model.targetHumidPct);
-    drawPill(180, 172, 120, buffer, Color::kAccentHumi);
 }
 
 void MainUiRenderer::renderPage1()
@@ -515,7 +453,7 @@ void MainUiRenderer::renderPage1()
     
     const bool isLock = m_model.lockdownActive;
     const bool isTurnOn = m_model.turningEnabled;
-    m_display.setTextColor(isLock ? kWarn : (isTurnOn ? Color::kOnIcon : Color::kOffIcon), Color::kBg);
+    m_display.setTextColor(isLock ? Color::kWarn : (isTurnOn ? Color::kOnIcon : Color::kOffIcon), Color::kBg);
     m_display.drawText(100, startY + (lineGap * 2), isLock ? "LOCK" : (isTurnOn ? "ON" : "OFF"));
 
     m_display.setTextColor(Color::kTextDim, Color::kBg);
@@ -533,283 +471,24 @@ void MainUiRenderer::renderPage1()
     m_display.drawText(100, startY + (lineGap * 3), buffer);
 }
 
-void MainUiRenderer::renderHelp()
+void MainUiRenderer::renderConfirm(const char* title, const char* line1, const char* line2)
 {
-    const int startY = Layout::kBodyY + 8;
-    const int lineGap = 24;
-
-    m_display.setTextSize(1);
+m_display.setTextSize(1);
     
-    // 프리미엄 가전 테마 텍스트 컬러 매핑 적용
-    m_display.setTextColor(Color::kText, Color::kBg);
-    m_display.drawText(16, startY, "기본 메뉴 작동법");
-
-    m_display.setTextColor(Color::kTextDim, Color::kBg);
-    m_display.drawText(16, startY + lineGap,       " 휠 회전  : 메인 화면 전환 및 메뉴 커서 이동");
-    m_display.drawText(16, startY + (lineGap * 2), " 버튼 클릭: 항목 선택 및 데이터 편집 모드 진입");
-    m_display.drawText(16, startY + (lineGap * 3), " 버튼 길게: 설정 메뉴 진입 및 이전 화면 복귀");
+    // 1. 타이틀 출력 (필요한 경우 추가)
+    m_display.setTextColor(Color::kAccentTemp, Color::kBg); // 눈에 띄는 색상 적용
+    m_display.drawText(34, 60, title); 
     
-    m_display.setTextColor(kWarn, Color::kBg);
-    m_display.drawText(16, startY + (lineGap * 4), "※ 수동 테스트 제어는 확인 후 자동 복귀됩니다.");
-    
-    m_display.setTextColor(Color::kAccentHumi, Color::kBg);
-    m_display.drawText(16, startY + (lineGap * 5), "※ 네트워크 연결은 BLE 모바일 설정을 지원합니다.");
-}
-
-void MainUiRenderer::renderPage2() { renderManual(); }
-void MainUiRenderer::renderPage3() { renderPlanEdit(); }
-
-void MainUiRenderer::renderPage4()
-{
-    char buffer[48];
-    std::snprintf(buffer, sizeof(buffer), "%u s", (unsigned int)(m_model.uptimeMs / 1000U));
-    drawRow(58, "Uptime", buffer, false, Color::kText);
-    std::snprintf(buffer, sizeof(buffer), "%u", (unsigned int)m_model.bootCount);
-    drawRow(84, "Boot cnt", buffer, false, Color::kTextDim);
-    drawRow(110, "Cloud", m_model.cloudConnected ? "ON" : "OFF", false, m_model.cloudConnected ? Color::kOnIcon : Color::kOffIcon);
-    drawRow(136, "IP", m_model.ipAddress[0] ? m_model.ipAddress : "IP 없음", false, Color::kTextDim);
-    drawRow(162, "Batch", m_model.batchActive ? "ACTIVE" : "STOP", false, m_model.batchActive ? Color::kOnIcon : Color::kOffIcon);
-    drawRow(188, "SafeMode", m_model.safeMode ? "YES" : "NO", false, m_model.safeMode ? kDanger : Color::kOnIcon);
-}
-
-void MainUiRenderer::renderMenu()
-{
-    static constexpr const char* kNames[kMenuCount] = {
-        "부화 시작일", "프리셋 선택", "일별 설정", "수동 테스트",
-        "WiFi 리셋", "BLE 설정", "재부팅", "공장 초기화"
-    };
-    static constexpr const char* kDesc[kMenuCount] = {
-        "날짜 관리", "종 선택", "스케줄 표", "배선 점검",
-        "인증 삭제", "QR 연결", "시스템", "10초 유지"
-    };
-
-    constexpr uint8_t kMaxVisible = 5;
-    uint8_t topIndex = 0;
-    
-    if (m_model.menuCursor >= kMaxVisible) {
-        topIndex = m_model.menuCursor - kMaxVisible + 1;
-    }
-
-    // [수정 완료] 타이핑 오타 수식 (v < v < kMaxVisible) -> (v < kMaxVisible)로 정상화
-    for (uint8_t v = 0; v < kMaxVisible; ++v) {
-        uint8_t i = topIndex + v;
-        if (i >= kMenuCount) break; 
-
-        int y = 54 + static_cast<int>(v) * 31; 
-        bool selected = (m_model.menuCursor == i);
-
-        uint32_t bg     = selected ? Color::kText : kPanel; 
-        uint32_t border = selected ? Color::kText : kPanelSoft;
-        uint32_t textFg = selected ? Color::kBg   : Color::kText; 
-        uint32_t descFg = selected ? Color::kBg   : Color::kTextDim; 
-
-        m_display.fillRect(12, y, 296, 27, bg);
-        m_display.drawRect(12, y, 296, 27, border);
-
-        m_display.setTextSize(1);
-        m_display.setTextColor(textFg, bg);
-        m_display.drawText(24, y + 7, kNames[i]);
-
-        m_display.setTextColor(descFg, bg);
-        m_display.drawText(196, y + 7, kDesc[i]);
-    }
-}
-
-void MainUiRenderer::renderStartDate()
-{
-    char dateStr[8];
-    static constexpr const char* labels[] = { "년", "월", "일" };
-    int values[] = { m_model.editBatchYear, m_model.editBatchMonth, m_model.editBatchDay };
-
-    for (int i = 0; i < 3; ++i) {
-        int x = 16 + i * 98;
-        int y = 60; 
-        
-        bool fieldSel = (m_model.screen == UiScreen::StartDate && m_model.fieldCursor == i);
-        
-        uint32_t valBg = fieldSel ? Color::kText : kPanel;
-        uint32_t valFg = fieldSel ? Color::kBg   : Color::kText; 
-        uint32_t boxBorder = fieldSel ? Color::kText : kPanelSoft;
-
-        m_display.setTextSize(1);
-        m_display.setTextColor(Color::kTextDim, Color::kBg);
-        m_display.drawText(x + 36, y + 6, labels[i]); 
-
-        m_display.fillRect(x, y + 20, 84, 56, valBg);
-        m_display.drawRect(x, y + 20, 84, 56, boxBorder);
-        
-        if (i == 0) std::snprintf(dateStr, sizeof(dateStr), "%04d", values[i]); 
-        else        std::snprintf(dateStr, sizeof(dateStr), "%02d", values[i]); 
-        
-        m_display.setTextSize(2);
-        m_display.setTextColor(valFg, valBg);
-        
-        int fontX = (i == 0) ? x + 18 : x + 30;
-        int fontY = y + 40;
-        m_display.drawText(fontX, fontY, dateStr);
-    }
-
-    const uint32_t saveBg = (m_model.fieldCursor == 3U) ? Color::kText : kPanel;
-    const uint32_t saveFg = (m_model.fieldCursor == 3U) ? Color::kBg   : Color::kText; 
-
-    m_display.setTextSize(1);
-    m_display.setTextColor(saveFg, saveBg);
-    drawButton(20, 164, 130, 32, "등 록", saveBg); 
-
-    const uint32_t cancelBg = (m_model.fieldCursor == 4U) ? Color::kText : kPanel;
-    const uint32_t cancelFg = (m_model.fieldCursor == 4U) ? Color::kBg   : Color::kText; 
-
-    m_display.setTextColor(cancelFg, cancelBg);
-    drawButton(170, 164, 130, 32, "취 소", cancelBg);
-}
-
-void MainUiRenderer::renderPreset()
-{
-    if (m_model.presetConfirm) {
-        renderConfirm("프리셋 적용", "정말 다시 생성하겠습니까?", "현재 계획이 새 프리셋으로 바뀝니다.");
-        return;
-    }
-    for (uint8_t i = 0; i < 4; ++i) {
-        char no[8];
-        std::snprintf(no, sizeof(no), "%u", i + 1U);
-        drawRow(56 + i * 36, no, presetName(i), m_model.presetCursor == i, Color::kText, 1);
-    }
-}
-
-void MainUiRenderer::renderPlanList()
-{
-    m_display.setTextSize(1);
-    m_display.setTextColor(Color::kTextDim, Color::kBg);
-    m_display.drawText(12, 52, "Day   Temp    Humi    Turn    Int");
-    
-    for (uint8_t i = 0; i < m_model.planListCount; ++i) {
-        const auto& item = m_model.planList[i];
-        uint16_t day = item.day;
-        int y = 68 + i * 28;
-        
-        bool sel = (day == m_model.editDay);
-        
-        uint32_t bg     = sel ? Color::kText : kPanel;
-        uint32_t border = sel ? Color::kText : kPanelSoft;
-        uint32_t textFg = sel ? Color::kBg   : Color::kText;
-
-        m_display.fillRect(8, y, 304, 26, bg);
-        m_display.drawRect(8, y, 304, 26, border);
-        
-        char row[64];
-        std::snprintf(row, sizeof(row), "D%02u  %.1f C  %.0f %%   %s   %u분%s",
-                      day,
-                      item.targetTempC,
-                      item.targetHumidPct,
-                      item.turningEnabled ? "ON" : "OFF",
-                      item.intervalMin,
-                      item.overridden ? "*" : "");
-        
-        m_display.setTextSize(1); 
-        m_display.setTextColor(textFg, bg);
-        m_display.drawText(16, y + 9, row);
-    }
-}
-
-void MainUiRenderer::renderPlanEdit()
-{
-    char buffer[32];
-
-    m_display.setTextSize(1);
-    m_display.setTextColor(Color::kTextDim, Color::kBg);
-    std::snprintf(buffer, sizeof(buffer), "D%02u 일정 상세 편집", m_model.editDay);
-    m_display.drawText(16, 34, buffer);
-    
-    std::snprintf(buffer, sizeof(buffer), "%.1f C", m_model.editTempC);
-    drawRow(54, "목표 온도", buffer, m_model.fieldCursor == 0, Color::kText, 1);
-    
-    std::snprintf(buffer, sizeof(buffer), "%.0f %%", m_model.editHumidPct);
-    drawRow(84, "목표 습도", buffer, m_model.fieldCursor == 1, Color::kText, 1);
-    
-    drawRow(114, "전란 모드", m_model.editTurning ? "ON" : "OFF", m_model.fieldCursor == 2, m_model.editTurning ? Color::kOnIcon : Color::kOffIcon, 1);
-    
-    std::snprintf(buffer, sizeof(buffer), "%u 분", m_model.editIntervalMin);
-    drawRow(144, "전란 주기", buffer, m_model.fieldCursor == 3, Color::kText, 1);
-
-    uint32_t saveBg = (m_model.fieldCursor == 4U) ? Color::kText : kPanel;
-    uint32_t saveFg = (m_model.fieldCursor == 4U) ? Color::kBg   : Color::kText; 
-    m_display.setTextColor(saveFg, saveBg);
-    drawButton(20, 180, 130, 28, "저 장", saveBg);
-
-    uint32_t cancelBg = (m_model.fieldCursor == 5U) ? Color::kText : kPanel;
-    uint32_t cancelFg = (m_model.fieldCursor == 5U) ? Color::kBg   : Color::kText; 
-    m_display.setTextColor(cancelFg, cancelBg);
-    drawButton(170, 180, 130, 28, "취 소", cancelBg);
-}
-
-void MainUiRenderer::renderManual()
-{
-    drawRow(62, "히터 제어", m_model.heaterOn ? "ON" : "OFF", m_model.manualCursor == 0,
-            m_model.heaterOn ? Color::kOnIcon : Color::kOffIcon, 2);
-    drawRow(96, "가습 제어", m_model.humidifierOn ? "ON" : "OFF", m_model.manualCursor == 1,
-            m_model.humidifierOn ? Color::kOnIcon : Color::kOffIcon, 2);
-    drawRow(130, "전란 모터", m_model.turnerOn ? "ON" : "OFF", m_model.manualCursor == 2,
-            m_model.turnerOn ? Color::kOnIcon : Color::kOffIcon, 2);
-    drawRow(164, "순환 팬", m_model.fanOn ? "ON" : "OFF", m_model.manualCursor == 3,
-            m_model.fanOn ? Color::kOnIcon : Color::kOffIcon, 2);
-}
-
-void MainUiRenderer::renderConfirm(const char*, const char* line1, const char* line2)
-{
-    m_display.setTextSize(1);
+    // 2. 안내 문구 출력
     m_display.setTextColor(Color::kText, Color::kBg);
     m_display.drawText(34, 82, line1);
+    
     m_display.setTextColor(Color::kTextDim, Color::kBg);
     m_display.drawText(34, 104, line2);
+    
+    // 3. 확인 버튼 출력
     drawRow(148, "아니오", "취소", m_model.confirmCursor == 0, Color::kOffIcon);
-    drawRow(180, "예", "실행", m_model.confirmCursor == 1, kDanger);
-}
-
-void MainUiRenderer::renderFactoryReset()
-{
-    m_display.setTextSize(1);
-    m_display.setTextColor(kDanger, Color::kBg);
-    m_display.drawText(24, 76, "모든 설정, WiFi, 부화 계획이 삭제됩니다.");
-    m_display.setTextColor(Color::kTextDim, Color::kBg);
-    m_display.drawText(24, 100, "실행하려면 버튼을 10초간 계속 누르세요.");
-    drawProgressBar(32, 138, 256, 18, m_model.factoryProgressPct, kDanger);
-    char pct[16];
-    std::snprintf(pct, sizeof(pct), "%u%%", m_model.factoryProgressPct);
-    m_display.setTextColor(Color::kText, Color::kBg);
-    m_display.drawText(144, 166, pct);
-}
-
-void MainUiRenderer::drawStatusIcons()
-{
-    m_display.setTextSize(1);
-    const bool blinkVisible = ((m_renderNowMs / 500U) % 2U) == 0U;
-
-    auto drawFooterPill = [&](int x, int w, const char* label, bool active) {
-        uint32_t border = Color::kOffIcon;
-        uint32_t fill   = Color::kFooter; 
-        uint32_t text   = Color::kTextDim; 
-
-        if (active) {
-            border = Color::kOnIcon; 
-            if (blinkVisible) {
-                fill = Color::kOnIcon;
-                text = Color::kText; 
-            } else {
-                fill = Color::kFooter;
-                text = Color::kOnIcon; 
-            }
-        }
-
-        m_display.fillRect(x, 218, w, 20, fill);
-        m_display.drawRect(x, 218, w, 20, border);
-        m_display.setTextColor(text, fill);
-        m_display.drawText(x + (hasUtf8(label) ? 8 : 6), 222, label);
-    };
-
-    drawFooterPill(8,  42, "히터", m_model.heaterOn);
-    drawFooterPill(54, 42, "가습", m_model.humidifierOn);
-    drawFooterPill(100, 42, "전란", m_model.turnerOn);
-    drawFooterPill(146, 32, "팬",  m_model.fanOn);
+    drawRow(180, "예", "실행", m_model.confirmCursor == 1, Color::kDanger);
 }
 
 void MainUiRenderer::drawSignalBars(int x, int y, bool connected, bool configured)
@@ -831,7 +510,7 @@ void MainUiRenderer::drawProgressBar(int x, int y, int w, int h, uint8_t pct, ui
 {
     if (pct > 100U) pct = 100U;
     int fillW = (w - 4) * static_cast<int>(pct) / 100;
-    m_display.drawRect(x, y, w, h, kPanelSoft);
+    m_display.drawRect(x, y, w, h, Color::kPanelSoft);
     m_display.fillRect(x + 2, y + 2, w - 4, h - 4, 0x0000U);
     if (fillW > 0) m_display.fillRect(x + 2, y + 2, fillW, h - 4, color);
 }
@@ -847,15 +526,15 @@ void MainUiRenderer::drawPill(int x, int y, int w, const char* label, uint32_t c
 void MainUiRenderer::drawButton(int x, int y, int w, int h, const char* label, uint32_t bgColor)
 {
     m_display.fillRect(x, y, w, h, bgColor);
-    m_display.drawRect(x, y, w, h, kPanelSoft);
+    m_display.drawRect(x, y, w, h, Color::kPanelSoft);
     m_display.setTextSize(1);
     m_display.drawText(x + (w / 2) - (std::strlen(label) * 3), y + (h / 2) - 4, label);
 }
 
 void MainUiRenderer::drawRow(int y, const char* label, const char* value, bool selected, uint32_t valColor, int valSize)
 {
-    uint32_t bg     = selected ? Color::kText : kPanel;
-    uint32_t border = selected ? Color::kText : kPanelSoft;
+    uint32_t bg     = selected ? Color::kText : Color::kPanel;
+    uint32_t border = selected ? Color::kText : Color::kPanelSoft;
     uint32_t textFg = selected ? Color::kBg   : Color::kText; 
 
     m_display.fillRect(12, y, 296, 27, bg);

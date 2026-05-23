@@ -23,4 +23,10 @@ namespace incubator::ui::Color
     static constexpr uint32_t kOffIcon    = 0x2146U; // 배경 속에 정갈하게 숨겨지는 다크 슬레이트
     static constexpr uint32_t kSelected   = 0x2B54U; // [해결] 메뉴 및 포커스 선택 시 부드러운 반전 음영을 주는 딥 인디고 블루
     static constexpr uint32_t kDivider    = 0x18E5U; // 가느다랗고 모던한 그리드 분리선
+
+    static constexpr uint32_t kPanel      = 0x2146U; 
+    static constexpr uint32_t kPanelSoft  = 0x31CDU; 
+    static constexpr uint32_t kOk         = 0x3666U; 
+    static constexpr uint32_t kWarn       = 0xECE4U; 
+    static constexpr uint32_t kDanger     = 0xD906U; 
 }

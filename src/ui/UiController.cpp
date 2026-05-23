@@ -1,4 +1,5 @@
 #include "ui/UiController.h"
+#include "config/AppConfig.h"
 #include "policy/DayResolver.h"
 #include <algorithm>
 #include <cmath>
@@ -9,9 +10,6 @@ namespace incubator::ui
 {
 namespace
 {
-    static constexpr uint8_t kMenuCount = 8;
-    static constexpr uint8_t kMainPageCount = 3;
-
     int clampInt(int value, int lo, int hi)
     {
         if (value < lo) return lo;
@@ -126,12 +124,13 @@ void UiController::handleDelta(int delta)
 
     switch (m_model.screen) {
         case UiScreen::Main:
-            m_model.activePage = static_cast<uint8_t>((m_model.activePage + kMainPageCount + step) % kMainPageCount);
+            m_model.activePage = static_cast<uint8_t>((m_model.activePage + Layout::kMainPageCount + step) % Layout::kMainPageCount);
             break;
         case UiScreen::Menu: {
             int cursor = static_cast<int>(m_model.menuCursor) + step;
-            if (cursor < 0) cursor = kMenuCount - 1;
-            if (cursor >= kMenuCount) cursor = 0;
+            // 🔥 Layout::kMenuCount 대신 kMainMenuCount 사용
+            if (cursor < 0) cursor = kMainMenuCount - 1;
+            if (cursor >= kMainMenuCount) cursor = 0;
             m_model.menuCursor = static_cast<uint8_t>(cursor);
             break;
         }
@@ -140,6 +139,7 @@ void UiController::handleDelta(int delta)
         case UiScreen::PlanList: planListDelta(step); break;
         case UiScreen::PlanEdit: page3Delta(step); break;
         case UiScreen::Manual: page2Delta(step); break;
+        case UiScreen::AwsTest: awsTestDelta(step); break;
         case UiScreen::WifiReset:
         case UiScreen::RebootConfirm:
             m_model.confirmCursor = m_model.confirmCursor ? 0 : 1;
@@ -152,6 +152,19 @@ void UiController::handleDelta(int delta)
 void UiController::handleClick()
 {
     switch (m_model.screen) {
+        case UiScreen::Main:
+            // 추가된 부분: activePage가 2(Help/Test)일 때 클릭 처리
+            if (m_model.activePage == 2) {
+                if (!m_model.cloudConnected) {
+                    m_model.pushAwsLog("실패: 네트워크 미연결");
+                } else if (!m_model.awsTestRunning) {
+                    m_model.awsTestRunning = true;
+                    m_model.pushAwsLog("1. 테스트 시작 요청...");
+                    // AppController를 통해 실제 AWS 전송 명령 하달 (Command Pattern)
+                    //m_ctrl.applyCommand(app::Cmd::TestAwsIot); 
+                }
+            }
+            break;        
         case UiScreen::Menu: enterMenuItem(); break;
         case UiScreen::StartDate: startDateClick(); break;
         case UiScreen::Preset: presetClick(); break;
@@ -164,6 +177,7 @@ void UiController::handleClick()
             break;
         case UiScreen::PlanEdit: page3Click(); break;
         case UiScreen::Manual: page2Click(); break;
+        case UiScreen::AwsTest: awsTestClick(); break;
         case UiScreen::WifiReset: wifiResetClick(); break;
         case UiScreen::RebootConfirm: rebootClick(); break;
         default:
@@ -206,44 +220,56 @@ void UiController::handleLongPress()
 void UiController::enterMenuItem()
 {
     m_model.actionMessage[0] = '\0';
-    switch (m_model.menuCursor) {
-        case 0:
+    
+    // 🔥 현재 커서가 가리키는 메뉴 항목의 '목표 화면(Target Screen)'을 가져옵니다.
+    UiScreen target = kMainMenuItems[m_model.menuCursor].targetScreen;
+
+    // 🔥 인덱스가 아닌 '목표 화면'을 기준으로 동작을 분기합니다!
+    switch (target) {
+        case UiScreen::StartDate:
             initDateFromSavedOrNow();
             m_model.fieldCursor = 0;
             m_model.editMode = false;
-            m_model.screen = UiScreen::StartDate;
+            m_model.screen = target;
             break;
-        case 1:
+        case UiScreen::Preset:
             m_model.presetConfirm = false;
             m_model.confirmCursor = 1;
-            m_model.screen = UiScreen::Preset;
+            m_model.screen = target;
             break;
-        case 2:
-            m_model.screen = UiScreen::PlanList;
+        case UiScreen::PlanList:
+            m_model.screen = target;
             if (m_model.editDay == 0) m_model.editDay = 1;
             loadEditRow(m_model.editDay);
             refreshPlanList();
             break;
-        case 3:
+        case UiScreen::Manual:
             enterManual();
             break;
-        case 4:
+        case UiScreen::AwsTest:
             m_model.confirmCursor = 0;
-            m_model.screen = UiScreen::WifiReset;
+            m_model.awsTestRunning = false;
+            m_model.screen = target;
             break;
-        case 5:
+        case UiScreen::WifiReset:
+            m_model.confirmCursor = 0;
+            m_model.screen = target;
+            break;
+        case UiScreen::BleProvisioning:
             m_provisioning.requestMenuProvisioning(m_state.uptimeMs);
             goHome();
             break;
-        case 6:
+        case UiScreen::RebootConfirm:
             m_model.confirmCursor = 0;
-            m_model.screen = UiScreen::RebootConfirm;
+            m_model.screen = target;
             break;
-        case 7:
+        case UiScreen::FactoryReset:
             m_model.factoryProgressPct = 0;
             m_model.factoryReady = false;
             m_factoryStartedMs = 0;
-            m_model.screen = UiScreen::FactoryReset;
+            m_model.screen = target;
+            break;
+        default:
             break;
     }
 }
@@ -346,6 +372,115 @@ void UiController::planListDelta(int d)
     m_model.editDay = static_cast<uint16_t>(clampInt(day, 1, maxDay));
     loadEditRow(m_model.editDay);
     refreshPlanList();
+}
+
+void UiController::awsTestDelta(int d)
+{
+    if (m_model.awsTestRunning || kAwsPublishEndpointCount == 0U) return;
+
+    int cursor = static_cast<int>(m_model.awsEndpointCursor) + d;
+    if (cursor < 0) cursor = kAwsPublishEndpointCount - 1;
+    if (cursor >= kAwsPublishEndpointCount) cursor = 0;
+    m_model.awsEndpointCursor = static_cast<uint8_t>(cursor);
+}
+
+void UiController::awsTestClick()
+{
+    if (m_model.awsTestRunning) return;
+
+    if (!m_model.cloudConnected) {
+        m_model.awsLastResult = false;
+        m_model.pushAwsLog("FAIL: MQTT disconnected");
+        return;
+    }
+    if (!m_awsPublishCb) {
+        m_model.awsLastResult = false;
+        m_model.pushAwsLog("FAIL: publisher missing");
+        return;
+    }
+
+    char topic[128];
+    char payload[512];
+    formatAwsTopic(topic, sizeof(topic));
+    if (!buildAwsTestPayload(payload, sizeof(payload))) {
+        m_model.awsLastResult = false;
+        m_model.pushAwsLog("FAIL: payload build");
+        return;
+    }
+
+    m_model.awsTestRunning = true;
+    m_model.pushAwsLog("Publish requested");
+    bool ok = m_awsPublishCb(topic, payload);
+    m_model.awsTestRunning = false;
+    m_model.awsLastResult = ok;
+    ++m_model.awsTestCount;
+
+    char log[64];
+    std::snprintf(log, sizeof(log), "%s %s",
+                  ok ? "OK:" : "FAIL:",
+                  kAwsPublishEndpoints[m_model.awsEndpointCursor].name);
+    m_model.pushAwsLog(log);
+}
+
+bool UiController::buildAwsTestPayload(char* buf, size_t bufSize) const
+{
+    if (!buf || bufSize == 0U) return false;
+
+    const AwsPublishEndpoint& endpoint = kAwsPublishEndpoints[m_model.awsEndpointCursor];
+    const char* batchId = m_model.batchId[0] ? m_model.batchId : "";
+
+    int written = std::snprintf(
+        buf, bufSize,
+        "{\"test\":true,"
+        "\"endpoint\":\"%s\","
+        "\"seq\":%u,"
+        "\"ts\":%u,"
+        "\"uptimeMs\":%u,"
+        "\"sensor\":{\"tempC\":%.2f,\"humidityPct\":%.2f},"
+        "\"target\":{\"tempC\":%.2f,\"humidityPct\":%.2f},"
+        "\"state\":{\"day\":%u,\"totalDays\":%u,\"batchActive\":%s,\"safeMode\":%s},"
+        "\"actuator\":{\"heater\":%s,\"humidifier\":%s,\"turner\":%s,\"fan\":%s},"
+        "\"batchId\":\"%s\"}",
+        endpoint.name,
+        static_cast<unsigned>(m_model.awsTestCount + 1U),
+        static_cast<unsigned>(std::time(nullptr)),
+        static_cast<unsigned>(m_model.uptimeMs),
+        static_cast<double>(m_model.displayTempC),
+        static_cast<double>(m_model.displayHumidPct),
+        static_cast<double>(m_model.targetTempC),
+        static_cast<double>(m_model.targetHumidPct),
+        static_cast<unsigned>(m_model.currentDay),
+        static_cast<unsigned>(m_model.totalDays),
+        m_model.batchActive ? "true" : "false",
+        m_model.safeMode ? "true" : "false",
+        m_model.heaterOn ? "true" : "false",
+        m_model.humidifierOn ? "true" : "false",
+        m_model.turnerOn ? "true" : "false",
+        m_model.fanOn ? "true" : "false",
+        batchId);
+
+    if (written < 0) return false;
+    if (static_cast<size_t>(written) >= bufSize) {
+        buf[bufSize - 1U] = '\0';
+        return false;
+    }
+    return true;
+}
+
+void UiController::formatAwsTopic(char* buf, size_t bufSize) const
+{
+    if (!buf || bufSize == 0U) return;
+
+#ifdef INCUBATOR_ENABLE_CLOUD
+    const char* deviceId = INCUBATOR_DEVICE_ID;
+#else
+    const char* deviceId = "Incubator-TEST";
+#endif
+
+    std::snprintf(buf, bufSize,
+                  kAwsPublishEndpoints[m_model.awsEndpointCursor].topicFormat,
+                  deviceId);
+    buf[bufSize - 1U] = '\0';
 }
 
 void UiController::wifiResetClick()

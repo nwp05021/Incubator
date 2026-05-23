@@ -96,6 +96,11 @@ void Application::init()
                 cloud::CmdParser::parse(payload, this->m_appCtrl);
             }
         );
+        m_uiCtrl.setAwsPublishCallback(
+            [this](const char* topic, const char* payload) {
+                return this->m_awsClient.publish(topic, payload);
+            }
+        );
 
         // ❌ [삭제/주석 처리] 이곳에 있던 esp_sntp_init() 관련 코드를 통째로 들어냅니다.
         // if (!esp_sntp_enabled()) { ... }
@@ -196,6 +201,7 @@ void Application::tick()
         }
 
         m_awsClient.tick(now, m_state.currentTempC, m_state.currentHumidityPct);    
+        m_state.cloudConnected = m_awsClient.isConnected();
     }
 #endif
 }

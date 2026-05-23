@@ -75,8 +75,16 @@ void ProvisioningManager::start(uint32_t nowMs, uint32_t timeoutMs, bool resetPr
 #if CONFIG_BLUEDROID_ENABLED
     ESP_LOGI(TAG, "Starting BLE provisioning: name=%s pop=%s timeout=%ums",
              m_deviceName, m_pop, static_cast<unsigned>(timeoutMs));
-    WiFi.disconnect(false, false);
-    WiFi.mode(WIFI_STA);
+
+    // =========================================================================
+    // [수정된 부분] Wi-Fi 라디오를 스캔 가능한 상태로 확실하게 초기화합니다.
+    // =========================================================================
+    WiFi.disconnect(false, true); // 현재 진행 중인 연결 차단 및 이전 자격증명 메모리 초기화 (라디오는 끄지 않음)
+    delay(50);                    // 내부 상태가 정리될 때까지 잠시 대기
+    WiFi.mode(WIFI_STA);          // 확실하게 Station(클라이언트) 모드로 지정
+    esp_wifi_start();             // BLE 매니저가 스캔할 수 있도록 Wi-Fi 드라이버 강제 시작
+    delay(50);
+    // =========================================================================
 
     static uint8_t uuid[16] = {0xb4, 0xdf, 0x5a, 0x1c, 0x3f, 0x6b, 0xf4, 0xbf,
                                0xea, 0x4a, 0x82, 0x03, 0x04, 0x90, 0x1a, 0x02};
@@ -242,7 +250,7 @@ void ProvisioningManager::markConnected()
     if (m_active || m_state != ProvisioningState::Succeeded) {
         m_state = ProvisioningState::Succeeded;
         if (m_active && m_finishAtMs == 0U) {
-            m_finishAtMs = millis() + 2000U; 
+            m_finishAtMs = millis() + 5000U; 
         } else if (!m_active) {
             stopProvisioning();
         }

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cstring> // [추장] strncpy 사용을 위해 필수로 추가
 
 namespace incubator::ui
 {
@@ -13,11 +14,48 @@ namespace incubator::ui
         PlanList,
         PlanEdit,
         Manual,
+        AwsTest,
         WifiReset,
         RebootConfirm,
         FactoryReset,
         System,
+        BleProvisioning // 🔥 BLE 동작을 매핑하기 위해 추가합니다.
     };
+
+    // 🔥 하나의 메뉴 정보를 담는 구조체입니다.
+    struct MenuItem {
+        const char* name;
+        const char* desc;
+        UiScreen targetScreen;
+    };
+
+    struct AwsPublishEndpoint {
+        const char* name;
+        const char* topicFormat;
+    };
+
+    // 🔥 앞으로 메뉴 추가/삭제/순서 변경은 오직 이 배열에서만 하시면 됩니다!
+    static constexpr MenuItem kMainMenuItems[] = {
+        { "부화 시작일", "날짜 관리", UiScreen::StartDate },
+        { "프리셋 선택", "종 선택", UiScreen::Preset },
+        { "일별 설정", "스케줄 표", UiScreen::PlanList },
+        { "수동 테스트", "배선 점검", UiScreen::Manual },
+        { "Aws 테스트", "AWS 연결", UiScreen::AwsTest },
+        { "WiFi 리셋", "인증 삭제", UiScreen::WifiReset },
+        { "BLE 설정", "QR 연결", UiScreen::BleProvisioning },
+        { "재부팅", "시스템", UiScreen::RebootConfirm },
+        { "공장 초기화", "10초 유지", UiScreen::FactoryReset }
+    };
+    static constexpr uint8_t kMainMenuCount = sizeof(kMainMenuItems) / sizeof(kMainMenuItems[0]);
+
+    static constexpr AwsPublishEndpoint kAwsPublishEndpoints[] = {
+        { "Telemetry", "esp32/%s/telemetry" },
+        { "Health", "incubator/%s/health" },
+        { "Shadow", "$aws/things/%s/shadow/update" },
+        { "Test", "incubator/%s/test" }
+    };
+    static constexpr uint8_t kAwsPublishEndpointCount =
+        sizeof(kAwsPublishEndpoints) / sizeof(kAwsPublishEndpoints[0]);
 
     struct PlanListItem
     {
@@ -100,5 +138,21 @@ namespace incubator::ui
         char     provisioningName[32] = {};
         char     provisioningPop[16] = {};
         char     provisioningMessage[40] = {};
+
+        // [이동] 컴파일 에러 해결을 위해 구조체 내부 멤버 변수로 격상 배치
+        bool awsTestRunning = false;
+        uint8_t awsEndpointCursor = 0;
+        uint32_t awsTestCount = 0;
+        bool awsLastResult = false;
+        char awsTestLog[4][64] = {"", "", "", ""};
+
+        // [이동] 구조체 내부 멤버 함수로 배치하여 멤버 변수에 정상 접근하도록 수정
+        void pushAwsLog(const char* msg) {
+            for (int i = 0; i < 3; ++i) {
+                std::strncpy(awsTestLog[i], awsTestLog[i + 1], sizeof(awsTestLog[i]));
+            }
+            std::strncpy(awsTestLog[3], msg, sizeof(awsTestLog[3]) - 1);
+            awsTestLog[3][sizeof(awsTestLog[3]) - 1] = '\0'; // 안전한 널 종료 보장
+        }    
     };
 }
