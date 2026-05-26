@@ -26,6 +26,7 @@ namespace incubator::domain
         bool     turningEnabled       = true;
         bool     cloudConnected       = false;
         bool     manualMode           = false;
+        bool     wifiConnected        = false;
         uint16_t currentDay          = 1;
         uint16_t totalDays           = 21;
         uint16_t nextTurningInMin    = 0;

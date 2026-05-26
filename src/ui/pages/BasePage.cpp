@@ -35,7 +35,7 @@ namespace incubator::ui::pages
 
     void BasePage::drawPill(int x, int y, int w, const char* label, uint32_t color)
     {
-        m_display.drawRect(x, y, w, 20, color);
+        m_display.drawRect(x, y + 1, w, 24, color);
         m_display.setTextSize(1);
         m_display.setTextColor(Color::kText, Color::kBg);
         m_display.drawText(x + (hasUtf8(label) ? 8 : 6), y + 4, label);

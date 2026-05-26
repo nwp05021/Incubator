@@ -74,7 +74,8 @@ namespace incubator::ui
         void renderHeader(uint32_t nowMs);
         void renderFooter(uint32_t nowMs);
         void drawStatusBar(uint32_t nowMs);
-        void drawSignalBars(int x, int y, bool connected, bool configured);
+        void drawSignalBars(int x, int y, bool connected);
+        void drawCloudIcon(int x, int y, bool connected);
         void drawProgressBar(int x, int y, int w, int h, uint8_t pct, uint32_t color);
         void drawPill(int x, int y, int w, const char* label, uint32_t color);
         void drawButton(int x, int y, int w, int h, const char* label, uint32_t bgColor);

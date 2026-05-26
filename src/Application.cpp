@@ -174,6 +174,11 @@ void Application::tick()
         // ─── [아키텍처 추가] 유효 IP 커넥션 확립 직후 SNTP 가동 ───
         static bool sntpReady = false;
         if (m_wifiMgr.isConnected()) {
+            m_state.wifiConnected = true;
+
+            // 모델에 IP 주소를 실시간 카피해 줍니다.
+            std::strncpy(m_state.ipAddress, m_wifiMgr.ipAddress(), sizeof(m_state.ipAddress) - 1);            
+
             if (!sntpReady) {
                 if (!esp_sntp_enabled()) {
                     ESP_LOGI(TAG, "▶ [네트워크 감지] 정상 IP 확보 완료. SNTP 인프라를 동적 활성화합니다.");
@@ -195,13 +200,16 @@ void Application::tick()
                 sntpReady = true;
             }
         } else {
-            // 연결 유실 시 재연결 시점에 즉각 리프레시 쿼리를 날리고 싶다면
-            // 이곳에서 sntpReady = false 처리를 고려할 수 있으나, lwIP 자체 폴링이 작동하므로
-            // 부팅 직후 최초 동기화 지연 청소용으로는 이 true 유지 구조만으로 충분합니다.
+            m_state.wifiConnected = false;
+            m_state.ipAddress[0] = '\0';        
+            sntpReady = false; // IP 연결이 끊어지면 SNTP 재활성화를 위해 플래그 리셋
         }
 
-        m_awsClient.tick(now, m_state.currentTempC, m_state.currentHumidityPct);    
+        m_awsClient.tick(now, m_state.currentTempC, m_state.currentHumidityPct);  
+        // [수정] 렌더러가 돌기 전 state와 uiModel의 네트워크 연결 플래그 동기화 순서를 일치시킵니다.
         m_state.cloudConnected = m_awsClient.isConnected();
+        m_uiModel.cloudConnected = m_state.cloudConnected;
+        m_uiModel.wifiConnected = m_state.wifiConnected;
     }
 #endif
 }

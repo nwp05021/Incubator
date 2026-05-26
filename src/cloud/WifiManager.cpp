@@ -98,6 +98,20 @@ void WifiManager::handleEvent(esp_event_base_t eventBase, int32_t eventId, void*
 
 void WifiManager::tick(uint32_t nowMs)
 {
+    // 🔥 [추가] 이벤트 누락을 대비한 능동적 IP 확인 방어 로직
+    if (!m_connected) {
+        esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        if (netif != nullptr) {
+            esp_netif_ip_info_t ip_info;
+            if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+                // IP가 이미 획득된 상태라면 강제로 연결 상태로 동기화합니다.
+                std::snprintf(m_ipAddress, sizeof(m_ipAddress), IPSTR, IP2STR(&ip_info.ip));
+                m_connected = true;
+                ESP_LOGI(TAG, "WiFi connected (Active check recovery): %s", m_ipAddress);
+            }
+        }
+    }
+
     if (m_connected) return;
 
     if (nowMs - m_lastRetryMs < kRetryIntervalMs) {

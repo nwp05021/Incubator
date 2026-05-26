@@ -29,11 +29,6 @@ namespace incubator::ui
         UiScreen targetScreen;
     };
 
-    struct AwsPublishEndpoint {
-        const char* name;
-        const char* topicFormat;
-    };
-
     // 🔥 앞으로 메뉴 추가/삭제/순서 변경은 오직 이 배열에서만 하시면 됩니다!
     static constexpr MenuItem kMainMenuItems[] = {
         { "부화 시작일", "날짜 관리", UiScreen::StartDate },
@@ -48,14 +43,41 @@ namespace incubator::ui
     };
     static constexpr uint8_t kMainMenuCount = sizeof(kMainMenuItems) / sizeof(kMainMenuItems[0]);
 
-    static constexpr AwsPublishEndpoint kAwsPublishEndpoints[] = {
-        { "Telemetry", "esp32/%s/telemetry" },
-        { "Health", "incubator/%s/health" },
-        { "Shadow", "$aws/things/%s/shadow/update" },
-        { "Test", "incubator/%s/test" }
+    // UiModel.h 파일 내 관련 배열 수정/확장
+    struct AwsPublishEndpoint {
+        const char* name;
+        const char* topicFormat;
     };
+
+    static constexpr AwsPublishEndpoint kAwsPublishEndpoints[] = {
+        { "Telemetry", "incubator/v1/%s/telemetry" },
+        { "Health",    "incubator/v1/%s/health" },
+        { "Shadow",    "$aws/things/%s/shadow/update" },
+        { "Cmd",       "incubator/v1/%s/cmd" }, // ◀ 내부 코어와 싱크를 맞추기 위해 명세에 추가
+        { "Test",      "incubator/v1/%s/test" }
+    };
+
     static constexpr uint8_t kAwsPublishEndpointCount =
         sizeof(kAwsPublishEndpoints) / sizeof(kAwsPublishEndpoints[0]);
+
+    // 💡 [단일 진실 원칙 준수] 엔드포인트 정보 검색 책임을 UiModel이 일괄적으로 가집니다.
+    inline int findAwsEndpointIndex(const char* name) {
+        for (uint8_t i = 0; i < kAwsPublishEndpointCount; ++i) {
+            if (std::strcmp(kAwsPublishEndpoints[i].name, name) == 0) {
+                return i; 
+            }
+        }
+        return 0; // 찾지 못했을 경우 기본값(Telemetry)의 인덱스 반환
+    }
+
+    inline const char* findAwsTopicFormat(const char* name) {
+        for (uint8_t i = 0; i < kAwsPublishEndpointCount; ++i) {
+            if (std::strcmp(kAwsPublishEndpoints[i].name, name) == 0) {
+                return kAwsPublishEndpoints[i].topicFormat;
+            }
+        }
+        return nullptr; // 찾지 못했을 경우
+    }
 
     struct PlanListItem
     {
@@ -130,6 +152,7 @@ namespace incubator::ui
         char     actionMessage[40] = {};
 
         bool     wifiConfigured    = false;
+        bool     wifiConnected     = false; // 🔥 [추가] 실제 WiFi 연결 여부 플래그
         bool     localMode         = false;
         bool     provisioningActive = false;
         bool     provisioningSucceeded = false;

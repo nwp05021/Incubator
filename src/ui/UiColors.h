@@ -26,7 +26,7 @@ namespace incubator::ui::Color
 
     static constexpr uint32_t kPanel      = 0x2146U; 
     static constexpr uint32_t kPanelSoft  = 0x31CDU; 
-    static constexpr uint32_t kOk         = 0x3666U; 
+    static constexpr uint32_t kOk         = 0x3666U; // 에메랄드 민트 그린
     static constexpr uint32_t kWarn       = 0xECE4U; 
     static constexpr uint32_t kDanger     = 0xD906U; 
 }

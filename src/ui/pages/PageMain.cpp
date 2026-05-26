@@ -52,10 +52,10 @@ namespace incubator::ui::pages
         }
 
         m_display.setTextSize(1);
-        std::snprintf(buffer, sizeof(buffer), "SET %.1f C", m_model.targetTempC);
+        std::snprintf(buffer, sizeof(buffer), "목표: %.1f C", m_model.targetTempC);
         drawPill(20, 172, 120, buffer, Color::kAccentTemp); 
 
-        std::snprintf(buffer, sizeof(buffer), "SET %.0f %%", m_model.targetHumidPct);
+        std::snprintf(buffer, sizeof(buffer), "목표: %.0f %%", m_model.targetHumidPct);
         drawPill(180, 172, 120, buffer, Color::kAccentHumi);
     }
 }

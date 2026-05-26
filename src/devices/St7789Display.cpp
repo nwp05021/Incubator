@@ -91,17 +91,28 @@ void St7789Display::drawRect(int x, int y, int w, int h, uint32_t color)
 
 void St7789Display::drawText(int x, int y, const char* text)
 {
-    if (!m_initialized) return;
+    if (!m_initialized) return; //
+    
     if (m_canvasReady) {
-        m_canvas.setFont(hasUtf8(text) ? &fonts::efontKR_16 : nullptr);
-        m_canvas.setTextSize(m_textSize);
-        m_canvas.setCursor(x, y);
-        m_canvas.print(text);
+        // [버그 수정] 삼항 연산자를 if-else 구조로 변경하여 폰트 객체 타입 불일치 에러 해결
+        if (hasUtf8(text)) {
+            m_canvas.setFont(&fonts::efontKR_16);
+        } else {
+            m_canvas.setFont(&fonts::efontKR_16);
+        }
+        m_canvas.setTextSize(m_textSize); //
+        m_canvas.setCursor(x, y); //
+        m_canvas.print(text); //
     } else {
-        m_gfx.setFont(hasUtf8(text) ? &fonts::efontKR_16 : nullptr);
-        m_gfx.setTextSize(m_textSize);
-        m_gfx.setCursor(x, y);
-        m_gfx.print(text);
+        // 하드웨어 다이렉트 드로잉 영역 보정
+        if (hasUtf8(text)) {
+            m_gfx.setFont(&fonts::efontKR_16);
+        } else {
+            m_gfx.setFont(&fonts::efontKR_16);
+        }
+        m_gfx.setTextSize(m_textSize); //
+        m_gfx.setCursor(x, y); //
+        m_gfx.print(text); //
     }
 }
 

@@ -40,8 +40,6 @@ namespace incubator::ui
         void handleDelta(int delta);
         void handleClick();
         void handleLongPress();
-        void page0Delta(int d);
-        void page1Delta(int d);
         void page2Delta(int d);
         void page2Click();
         void page3Delta(int d);

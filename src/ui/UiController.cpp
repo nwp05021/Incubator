@@ -84,10 +84,13 @@ void UiController::syncFromState()
     m_model.manualMode = m_state.manualMode;
     m_model.bootCount = m_state.bootCount;
     m_model.uptimeMs = m_state.uptimeMs;
-    m_model.cloudConnected = m_state.cloudConnected || m_provisioning.isConnected();
+    
+    // [수정] 아래 두 라인을 확실하게 묶어 UI 연동 결함을 해결합니다.
+    m_model.cloudConnected = m_state.cloudConnected; 
     std::memcpy(m_model.ipAddress, m_state.ipAddress, sizeof(m_model.ipAddress));
 
     m_model.wifiConfigured = m_provisioning.isConfigured();
+    m_model.wifiConnected = m_state.wifiConnected;
     m_model.localMode = m_provisioning.isLocalMode();
     m_model.provisioningActive = m_provisioning.isActive();
     m_model.provisioningSucceeded = m_provisioning.isSucceeded();
@@ -374,25 +377,44 @@ void UiController::planListDelta(int d)
     refreshPlanList();
 }
 
+// =========================================================================
+// [수정] AWS 테스트 화면에서 엔코더 회전 시: [전송](0) ↔ [취소](1) 토글
+// =========================================================================
 void UiController::awsTestDelta(int d)
 {
-    if (m_model.awsTestRunning || kAwsPublishEndpointCount == 0U) return;
-
-    int cursor = static_cast<int>(m_model.awsEndpointCursor) + d;
-    if (cursor < 0) cursor = kAwsPublishEndpointCount - 1;
-    if (cursor >= kAwsPublishEndpointCount) cursor = 0;
-    m_model.awsEndpointCursor = static_cast<uint8_t>(cursor);
-}
-
-void UiController::awsTestClick()
-{
+    // 사용자가 전송 중이 아닐 때만 반응
     if (m_model.awsTestRunning) return;
 
+    // delta(d)가 양수(+)면 1[취소], 음수(-)면 0[전송]으로 커서 스위칭
+    if (d > 0) {
+        m_model.confirmCursor = 1;
+    } else if (d < 0) {
+        m_model.confirmCursor = 0;
+    }
+}
+
+// =========================================================================
+// [리팩토링] AWS 테스트 화면에서 엔코더 클릭 시 처리 (SSOT 준수)
+// =========================================================================
+void UiController::awsTestClick()
+{
+    // 1. [취소] 버튼 위치에서 클릭 시 메뉴 화면으로 즉시 탈출
+    if (m_model.confirmCursor == 1) {
+        goMenu();
+        return;
+    }
+
+    // 2. [전송] 버튼 위치에서 클릭 시 로직 가동
+    if (m_model.awsTestRunning) return;
+
+    // 네트워크 끊김 예외 처리
     if (!m_model.cloudConnected) {
         m_model.awsLastResult = false;
         m_model.pushAwsLog("FAIL: MQTT disconnected");
         return;
     }
+    
+    // 콜백 함수 부재 예외 처리
     if (!m_awsPublishCb) {
         m_model.awsLastResult = false;
         m_model.pushAwsLog("FAIL: publisher missing");
@@ -401,24 +423,31 @@ void UiController::awsTestClick()
 
     char topic[128];
     char payload[512];
+    
+    // UiModel에 내장된 함수를 호출하여 인덱스를 찾아옵니다.
+    m_model.awsEndpointCursor = findAwsEndpointIndex("Test"); 
+    
+    // 구조체 배열 규칙에 명시된 토픽 포맷을 사용하여 안전하게 토픽명을 빌드합니다.
     formatAwsTopic(topic, sizeof(topic));
+    
     if (!buildAwsTestPayload(payload, sizeof(payload))) {
         m_model.awsLastResult = false;
         m_model.pushAwsLog("FAIL: payload build");
         return;
     }
 
+    // 플래그 가동 및 콜백 발행 호출 (실제 전송 트리거)
     m_model.awsTestRunning = true;
     m_model.pushAwsLog("Publish requested");
+    
     bool ok = m_awsPublishCb(topic, payload);
+    
     m_model.awsTestRunning = false;
     m_model.awsLastResult = ok;
     ++m_model.awsTestCount;
 
     char log[64];
-    std::snprintf(log, sizeof(log), "%s %s",
-                  ok ? "OK:" : "FAIL:",
-                  kAwsPublishEndpoints[m_model.awsEndpointCursor].name);
+    std::snprintf(log, sizeof(log), "%s Manual %s", ok ? "OK:" : "FAIL:", kAwsPublishEndpoints[m_model.awsEndpointCursor].name);
     m_model.pushAwsLog(log);
 }
 
@@ -545,14 +574,6 @@ void UiController::goHome()
     m_model.activePage = 0;
     m_model.activeEditField = EditField::None;
     m_model.editMode = false;
-}
-
-void UiController::page0Delta(int)
-{
-}
-
-void UiController::page1Delta(int)
-{
 }
 
 void UiController::page2Delta(int d)
