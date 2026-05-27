@@ -53,10 +53,10 @@ namespace incubator::cloud
         esp_mqtt_client_handle_t m_client = nullptr;
 
         uint32_t m_lastSampleTime = 0;       
-        float m_tempSamples[10] = {0.0f};    
-        float m_humidSamples[10] = {0.0f};   
-        uint32_t m_timeSamples[10] = {0};    // 💡 개별 데이터 샘플링 시간을 저장할 배열 추가
-        int m_sampleCount = 0;               
+        float m_temperatureItems[10] = {0.0f};    
+        float m_humidityItems[10] = {0.0f};   
+        uint32_t m_timestampItems[10] = {0};    // 💡 개별 데이터 샘플링 시간을 저장할 배열 추가
+        int m_ItemCount = 0;               
 
         bool readFileToString(const char* path, std::string& outStr);
         void handleMqttEvent(int32_t eventId, void* eventData);

@@ -99,7 +99,7 @@ bool AwsIotClient::init(const char* endpoint, const char* deviceId, storage::Pla
 }
 
 // 💡 링커 에러 수정 1: 복원된 tick 함수 (10초 버퍼링 및 100초 주기 Batch 전송)
-void AwsIotClient::tick(uint32_t now, float currentTemp, float currentHumidity)
+void AwsIotClient::tick(uint32_t now, float currTemperature, float currHumidity)
 {
     if (!m_connected) return;
 
@@ -107,26 +107,26 @@ void AwsIotClient::tick(uint32_t now, float currentTemp, float currentHumidity)
     if (m_lastSampleTime == 0 || (now - m_lastSampleTime >= 10000)) {
         m_lastSampleTime = now;
 
-        if (m_sampleCount < 10) {
-            m_tempSamples[m_sampleCount] = currentTemp;
-            m_humidSamples[m_sampleCount] = currentHumidity;
-            m_timeSamples[m_sampleCount]  = static_cast<uint32_t>(std::time(nullptr)); // 💡 샘플링 시점의 Epoch Time 기록
-            m_sampleCount++;
+        if (m_ItemCount < 10) {
+            m_temperatureItems[m_ItemCount] = currTemperature;
+            m_humidityItems[m_ItemCount] = currHumidity;
+            m_timestampItems[m_ItemCount]  = static_cast<uint32_t>(std::time(nullptr)); // 💡 샘플링 시점의 Epoch Time 기록
+            m_ItemCount++;
         }
     }
 
     // 2️⃣ 10개의 샘플이 모두 모이면 AWS로 전송할 JSON 조립
-    if (m_sampleCount >= 10) {
+    if (m_ItemCount >= 10) {
         char jsonBuffer[1024];
         // thingName을 포함한 기본 메타데이터 구조 시작
         int offset = std::snprintf(jsonBuffer, sizeof(jsonBuffer),
-            "{\"thingName\":\"%s\",\"samples\":[", m_deviceId);
+            "{\"thingName\":\"%s\",\"items\":[", m_deviceId);
 
         // 개별 샘플 돌면서 't'(온도), 'h'(습도), 'ts'(타임스탬프) 구조로 조립
         for (int i = 0; i < 10; ++i) {
             int written = std::snprintf(jsonBuffer + offset, sizeof(jsonBuffer) - offset,
                 "{\"t\":%.2f,\"h\":%.2f,\"ts\":%lu}%s", // ⚠️ %u를 %lu로 변경!
-                m_tempSamples[i], m_humidSamples[i], m_timeSamples[i], 
+                m_temperatureItems[i], m_humidityItems[i], m_timestampItems[i], 
                 (i == 9) ? "" : ",");
             
             if (written > 0) {
@@ -145,7 +145,7 @@ void AwsIotClient::tick(uint32_t now, float currentTemp, float currentHumidity)
         }
 
         // 카운트 초기화하여 다음 100초 주기 준비
-        m_sampleCount = 0;
+        m_ItemCount = 0;
     }
 }
 
